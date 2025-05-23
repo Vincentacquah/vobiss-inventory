@@ -1,131 +1,256 @@
 
-// API layer for backend communication
-// This file will handle all backend interactions
-
-const API_BASE_URL = 'http://localhost:3001/api'; // Update with your backend URL
-
-// Helper function to handle API responses
-const handleResponse = async (response) => {
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status} ${response.statusText}`);
-  }
-  return response.json();
-};
-
-// Helper function to make API calls
-const apiCall = async (endpoint, options = {}) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-      ...options,
-    });
-    return handleResponse(response);
-  } catch (error) {
-    console.error(`API call failed for ${endpoint}:`, error);
-    // Return mock data for development/testing
-    return getMockData(endpoint, options.method);
-  }
-};
-
-// Mock data for testing without backend
-const getMockData = (endpoint, method) => {
-  const mockItems = [
-    { id: '1', name: 'ONT Router', description: 'Optical Network Terminal Router', categoryId: '1', quantity: 25, lowStockThreshold: 10 },
-    { id: '2', name: 'Ethernet Cable', description: 'Cat6 Ethernet Cable 5m', categoryId: '2', quantity: 150, lowStockThreshold: 20 },
-    { id: '3', name: 'Network Switch', description: '8-port Gigabit Switch', categoryId: '3', quantity: 8, lowStockThreshold: 5 },
-    { id: '4', name: 'WiFi Router', description: 'Dual Band AC1200 Router', categoryId: '1', quantity: 15, lowStockThreshold: 8 },
-    { id: '5', name: 'Fiber Cable', description: 'Single mode fiber optic cable', categoryId: '2', quantity: 45, lowStockThreshold: 15 }
-  ];
-
-  const mockCategories = [
-    { id: '1', name: 'Routers', description: 'Network routing equipment', itemCount: 2 },
-    { id: '2', name: 'Cables', description: 'Network cables and connectors', itemCount: 2 },
-    { id: '3', name: 'Switches', description: 'Network switching equipment', itemCount: 1 },
-    { id: '4', name: 'ONTs', description: 'Optical Network Terminals', itemCount: 0 }
-  ];
-
-  const mockItemsOut = [
-    { id: '1', personName: 'John Smith', itemId: '1', itemName: 'ONT Router', categoryName: 'Routers', quantity: 2, dateTime: '2024-01-21T10:30:00Z' },
-    { id: '2', personName: 'Sarah Johnson', itemId: '2', itemName: 'Ethernet Cable', categoryName: 'Cables', quantity: 5, dateTime: '2024-01-21T14:15:00Z' },
-    { id: '3', personName: 'Mike Davis', itemId: '3', itemName: 'Network Switch', categoryName: 'Switches', quantity: 1, dateTime: '2024-01-20T09:45:00Z' },
-    { id: '4', personName: 'Emily Brown', itemId: '4', itemName: 'WiFi Router', categoryName: 'Routers', quantity: 1, dateTime: '2024-01-19T16:20:00Z' },
-    { id: '5', personName: 'David Wilson', itemId: '2', itemName: 'Ethernet Cable', categoryName: 'Cables', quantity: 3, dateTime: '2024-01-19T11:10:00Z' }
-  ];
-
-  // Route mock responses
-  if (endpoint === '/items') {
-    if (method === 'POST') return { id: Date.now().toString(), ...mockItems[0] };
-    return mockItems;
-  }
-  if (endpoint === '/categories') {
-    if (method === 'POST') return { id: Date.now().toString(), ...mockCategories[0] };
-    return mockCategories;
-  }
-  if (endpoint === '/items-out') {
-    if (method === 'POST') return { id: Date.now().toString(), ...mockItemsOut[0] };
-    return mockItemsOut;
-  }
-  if (endpoint === '/low-stock') {
-    return mockItems.filter(item => item.quantity <= item.lowStockThreshold);
-  }
-  
-  return [];
-};
+// API layer that now uses Supabase client
+import { supabase } from './integrations/supabase/client';
 
 // Items API
-export const getItems = () => apiCall('/items');
+export const getItems = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('items')
+      .select(`
+        *,
+        categories:category_id (name)
+      `);
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching items:', error);
+    return [];
+  }
+};
 
-export const addItem = (itemData) => apiCall('/items', {
-  method: 'POST',
-  body: JSON.stringify(itemData),
-});
+export const addItem = async (itemData) => {
+  try {
+    const { data, error } = await supabase
+      .from('items')
+      .insert([{
+        name: itemData.name,
+        description: itemData.description,
+        category_id: itemData.categoryId,
+        quantity: itemData.quantity,
+        low_stock_threshold: itemData.lowStockThreshold
+      }])
+      .select();
+    
+    if (error) throw error;
+    return data?.[0];
+  } catch (error) {
+    console.error('Error adding item:', error);
+    throw error;
+  }
+};
 
-export const updateItem = (itemId, itemData) => apiCall(`/items/${itemId}`, {
-  method: 'PUT',
-  body: JSON.stringify(itemData),
-});
+export const updateItem = async (itemId, itemData) => {
+  try {
+    const { data, error } = await supabase
+      .from('items')
+      .update({
+        name: itemData.name,
+        description: itemData.description,
+        category_id: itemData.categoryId,
+        quantity: itemData.quantity,
+        low_stock_threshold: itemData.lowStockThreshold,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', itemId)
+      .select();
+    
+    if (error) throw error;
+    return data?.[0];
+  } catch (error) {
+    console.error('Error updating item:', error);
+    throw error;
+  }
+};
 
-export const deleteItem = (itemId) => apiCall(`/items/${itemId}`, {
-  method: 'DELETE',
-});
+export const deleteItem = async (itemId) => {
+  try {
+    const { error } = await supabase
+      .from('items')
+      .delete()
+      .eq('id', itemId);
+    
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Error deleting item:', error);
+    throw error;
+  }
+};
 
 // Categories API
-export const getCategories = () => apiCall('/categories');
+export const getCategories = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*');
+    
+    if (error) throw error;
+    
+    // Get item counts for each category
+    const { data: items } = await supabase
+      .from('items')
+      .select('category_id');
+    
+    const categoryCounts = {};
+    items?.forEach(item => {
+      if (item.category_id) {
+        categoryCounts[item.category_id] = (categoryCounts[item.category_id] || 0) + 1;
+      }
+    });
+    
+    return (data || []).map(category => ({
+      ...category,
+      itemCount: categoryCounts[category.id] || 0
+    }));
+  } catch (error) {
+    console.error('Error fetching categories:', error);
+    return [];
+  }
+};
 
-export const addCategory = (categoryData) => apiCall('/categories', {
-  method: 'POST',
-  body: JSON.stringify(categoryData),
-});
+export const addCategory = async (categoryData) => {
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .insert([{
+        name: categoryData.name,
+        description: categoryData.description
+      }])
+      .select();
+    
+    if (error) throw error;
+    return data?.[0];
+  } catch (error) {
+    console.error('Error adding category:', error);
+    throw error;
+  }
+};
 
-export const updateCategory = (categoryId, categoryData) => apiCall(`/categories/${categoryId}`, {
-  method: 'PUT',
-  body: JSON.stringify(categoryData),
-});
+export const updateCategory = async (categoryId, categoryData) => {
+  try {
+    const { data, error } = await supabase
+      .from('categories')
+      .update({
+        name: categoryData.name,
+        description: categoryData.description
+      })
+      .eq('id', categoryId)
+      .select();
+    
+    if (error) throw error;
+    return data?.[0];
+  } catch (error) {
+    console.error('Error updating category:', error);
+    throw error;
+  }
+};
 
-export const deleteCategory = (categoryId) => apiCall(`/categories/${categoryId}`, {
-  method: 'DELETE',
-});
+export const deleteCategory = async (categoryId) => {
+  try {
+    const { error } = await supabase
+      .from('categories')
+      .delete()
+      .eq('id', categoryId);
+    
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error('Error deleting category:', error);
+    throw error;
+  }
+};
 
 // Items Out API
-export const getItemsOut = () => apiCall('/items-out');
+export const getItemsOut = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('items_out')
+      .select(`
+        *,
+        items:item_id (
+          name,
+          categories:category_id (name)
+        )
+      `)
+      .order('date_time', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching items out:', error);
+    return [];
+  }
+};
 
-export const issueItem = (issueData) => apiCall('/items-out', {
-  method: 'POST',
-  body: JSON.stringify(issueData),
-});
+export const issueItem = async (issueData) => {
+  try {
+    const { data, error } = await supabase
+      .from('items_out')
+      .insert([{
+        person_name: issueData.personName,
+        item_id: issueData.itemId,
+        quantity: issueData.quantity,
+        date_time: new Date().toISOString()
+      }])
+      .select();
+    
+    if (error) throw error;
+    return data?.[0];
+  } catch (error) {
+    console.error('Error issuing item:', error);
+    throw error;
+  }
+};
 
 // Low Stock API
-export const getLowStockItems = () => apiCall('/low-stock');
-
-// Reports API
-export const getUsageData = (days = 7) => apiCall(`/reports/usage?days=${days}`);
-
-export const getTopItems = (days = 7) => apiCall(`/reports/top-items?days=${days}`);
-
-export const getTopUsers = (days = 7) => apiCall(`/reports/top-users?days=${days}`);
+export const getLowStockItems = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('items')
+      .select(`
+        *,
+        categories:category_id (name)
+      `)
+      .lte('quantity', supabase.rpc('least', { a: 'quantity', b: 'low_stock_threshold' }));
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching low stock items:', error);
+    return [];
+  }
+};
 
 // Dashboard API
-export const getDashboardStats = () => apiCall('/dashboard/stats');
+export const getDashboardStats = async () => {
+  try {
+    const [itemsResponse, categoriesResponse, itemsOutResponse] = await Promise.all([
+      supabase.from('items').select('*'),
+      supabase.from('categories').select('*'),
+      supabase.from('items_out').select('*')
+    ]);
+    
+    const items = itemsResponse.data || [];
+    const categories = categoriesResponse.data || [];
+    const itemsOut = itemsOutResponse.data || [];
+    
+    const lowStock = items.filter(item => item.quantity <= item.low_stock_threshold);
+    
+    return {
+      totalItems: items.length,
+      totalCategories: categories.length,
+      itemsOut: itemsOut.length,
+      lowStockItems: lowStock.length
+    };
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
+    return {
+      totalItems: 0,
+      totalCategories: 0,
+      itemsOut: 0,
+      lowStockItems: 0
+    };
+  }
+};

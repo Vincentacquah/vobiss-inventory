@@ -1,7 +1,33 @@
 
 import React, { useState, useEffect } from 'react';
+import { useToast } from "@/hooks/use-toast";
 
-const ItemForm = ({ item, categories, onSave, onCancel }) => {
+interface Category {
+  id: string;
+  name: string;
+}
+
+interface ItemFormProps {
+  item?: {
+    id?: string;
+    name: string;
+    description: string;
+    categoryId: string;
+    quantity: number;
+    lowStockThreshold: number;
+  } | null;
+  categories: Category[];
+  onSave: (data: { 
+    name: string; 
+    description: string; 
+    categoryId: string; 
+    quantity: number; 
+    lowStockThreshold: number 
+  }) => void;
+  onCancel: () => void;
+}
+
+const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -9,6 +35,7 @@ const ItemForm = ({ item, categories, onSave, onCancel }) => {
     quantity: 0,
     lowStockThreshold: 10
   });
+  const { toast } = useToast();
 
   useEffect(() => {
     if (item) {
@@ -22,8 +49,24 @@ const ItemForm = ({ item, categories, onSave, onCancel }) => {
     }
   }, [item]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.name.trim()) {
+      toast({
+        title: "Error",
+        description: "Item name is required",
+        variant: "destructive"
+      });
+      return;
+    }
+    if (!formData.categoryId) {
+      toast({
+        title: "Error",
+        description: "Please select a category",
+        variant: "destructive"
+      });
+      return;
+    }
     onSave(formData);
   };
 
@@ -50,7 +93,7 @@ const ItemForm = ({ item, categories, onSave, onCancel }) => {
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          rows="3"
+          rows={3}
         />
       </div>
 
@@ -79,7 +122,7 @@ const ItemForm = ({ item, categories, onSave, onCancel }) => {
           <input
             type="number"
             value={formData.quantity}
-            onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 0 })}
+            onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) || 0 })}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             min="0"
             required
@@ -93,7 +136,7 @@ const ItemForm = ({ item, categories, onSave, onCancel }) => {
           <input
             type="number"
             value={formData.lowStockThreshold}
-            onChange={(e) => setFormData({ ...formData, lowStockThreshold: parseInt(e.target.value) || 0 })}
+            onChange={(e) => setFormData({ ...formData, lowStockThreshold: Number(e.target.value) || 0 })}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             min="0"
           />

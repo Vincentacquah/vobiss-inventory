@@ -1,44 +1,133 @@
 
 import React, { useState, useEffect } from 'react';
 import { Package, Tags, ArrowUpRight, AlertTriangle, TrendingUp, Users } from 'lucide-react';
-import * as api from '../api';
+import { supabase } from '../integrations/supabase/client';
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
+import { useNavigate } from 'react-router-dom';
+
+interface Stats {
+  totalItems: number;
+  totalCategories: number;
+  itemsOut: number;
+  lowStockItems: number;
+}
+
+interface RecentActivity {
+  id: string;
+  personName: string;
+  quantity: number;
+  itemName: string;
+  dateTime: string;
+}
 
 const Dashboard = () => {
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
     totalItems: 0,
     totalCategories: 0,
     itemsOut: 0,
     lowStockItems: 0
   });
-  const [recentActivity, setRecentActivity] = useState([]);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const { toast } = useToast();
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadDashboardData();
+    subscribeToChanges();
   }, []);
 
   const loadDashboardData = async () => {
     try {
-      const [items, categories, itemsOutData, lowStock] = await Promise.all([
-        api.getItems(),
-        api.getCategories(),
-        api.getItemsOut(),
-        api.getLowStockItems()
+      setLoading(true);
+      
+      const [itemsResponse, categoriesResponse, itemsOutResponse] = await Promise.all([
+        supabase.from('items').select('*'),
+        supabase.from('categories').select('*'),
+        supabase.from('items_out').select('*')
       ]);
+
+      const items = itemsResponse.data || [];
+      const categories = categoriesResponse.data || [];
+      const itemsOut = itemsOutResponse.data || [];
+      
+      const lowStock = items.filter(item => item.quantity <= item.low_stock_threshold);
 
       setStats({
         totalItems: items.length,
         totalCategories: categories.length,
-        itemsOut: itemsOutData.length,
+        itemsOut: itemsOut.length,
         lowStockItems: lowStock.length
       });
 
-      setRecentActivity(itemsOutData.slice(-5));
+      // Get recent activities with item names
+      const recentActivities = await supabase
+        .from('items_out')
+        .select('*, items:item_id(name)')
+        .order('date_time', { ascending: false })
+        .limit(5);
+
+      if (recentActivities.data) {
+        setRecentActivity(recentActivities.data.map(activity => ({
+          id: activity.id,
+          personName: activity.person_name,
+          quantity: activity.quantity,
+          itemName: activity.items?.name || 'Unknown Item',
+          dateTime: activity.date_time
+        })));
+      }
+
     } catch (error) {
       console.error('Error loading dashboard data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load dashboard data",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const StatCard = ({ icon: Icon, title, value, color, trend }) => (
+  const subscribeToChanges = () => {
+    const itemsChannel = supabase
+      .channel('public:items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, () => {
+        loadDashboardData();
+      })
+      .subscribe();
+
+    const categoriesChannel = supabase
+      .channel('public:categories')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+        loadDashboardData();
+      })
+      .subscribe();
+
+    const itemsOutChannel = supabase
+      .channel('public:items_out')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items_out' }, () => {
+        loadDashboardData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(itemsChannel);
+      supabase.removeChannel(categoriesChannel);
+      supabase.removeChannel(itemsOutChannel);
+    };
+  };
+
+  interface StatCardProps {
+    icon: React.ElementType;
+    title: string;
+    value: number;
+    color: string;
+    trend?: string;
+  }
+
+  const StatCard: React.FC<StatCardProps> = ({ icon: Icon, title, value, color, trend }) => (
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between">
         <div>
@@ -58,12 +147,23 @@ const Dashboard = () => {
     </div>
   );
 
+  if (loading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-1">Welcome back! Here's what's happening with your inventory.</p>
+        <p className="text-gray-600 mt-1">Welcome to your inventory management system.</p>
       </div>
 
       {/* Stats Grid */}
@@ -123,15 +223,24 @@ const Dashboard = () => {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
           <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
           <div className="space-y-3">
-            <button className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+            <Button 
+              className="w-full bg-blue-600 hover:bg-blue-700"
+              onClick={() => navigate('/items-out')}
+            >
               Issue Item
-            </button>
-            <button className="w-full bg-green-600 text-white py-3 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium">
+            </Button>
+            <Button 
+              className="w-full bg-green-600 hover:bg-green-700"
+              onClick={() => navigate('/inventory')}
+            >
               Add New Item
-            </button>
-            <button className="w-full bg-purple-600 text-white py-3 px-4 rounded-lg hover:bg-purple-700 transition-colors font-medium">
+            </Button>
+            <Button 
+              className="w-full bg-purple-600 hover:bg-purple-700"
+              onClick={() => navigate('/reports')}
+            >
               View Reports
-            </button>
+            </Button>
           </div>
         </div>
       </div>

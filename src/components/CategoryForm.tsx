@@ -1,11 +1,23 @@
 
 import React, { useState, useEffect } from 'react';
+import { useToast } from "@/hooks/use-toast";
 
-const CategoryForm = ({ category, onSave, onCancel }) => {
+interface CategoryFormProps {
+  category?: {
+    id?: string;
+    name: string;
+    description: string;
+  } | null;
+  onSave: (data: { name: string; description: string }) => void;
+  onCancel: () => void;
+}
+
+const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     name: '',
     description: ''
   });
+  const { toast } = useToast();
 
   useEffect(() => {
     if (category) {
@@ -16,8 +28,16 @@ const CategoryForm = ({ category, onSave, onCancel }) => {
     }
   }, [category]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.name.trim()) {
+      toast({
+        title: "Error",
+        description: "Category name is required",
+        variant: "destructive"
+      });
+      return;
+    }
     onSave(formData);
   };
 
@@ -44,7 +64,7 @@ const CategoryForm = ({ category, onSave, onCancel }) => {
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          rows="3"
+          rows={3}
         />
       </div>
 

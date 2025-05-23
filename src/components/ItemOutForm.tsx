@@ -1,14 +1,35 @@
 
 import React, { useState, useEffect } from 'react';
-import * as api from '../api';
+import { supabase } from '../integrations/supabase/client';
+import { useToast } from "@/hooks/use-toast";
 
-const ItemOutForm = ({ onSave, onCancel }) => {
+interface Item {
+  id: string;
+  name: string;
+  description?: string;
+  quantity: number;
+}
+
+interface ItemOutFormProps {
+  onSave: (data: {
+    personName: string;
+    itemId: string;
+    quantity: number;
+    itemName: string;
+    dateTime: string;
+  }) => void;
+  onCancel: () => void;
+}
+
+const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
   const [formData, setFormData] = useState({
     personName: '',
     itemId: '',
     quantity: 1
   });
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadItems();
@@ -16,24 +37,54 @@ const ItemOutForm = ({ onSave, onCancel }) => {
 
   const loadItems = async () => {
     try {
-      const data = await api.getItems();
-      setItems(data);
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('items')
+        .select('*')
+        .gt('quantity', 0);
+
+      if (error) throw error;
+      setItems(data || []);
     } catch (error) {
       console.error('Error loading items:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load available items",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const selectedItem = items.find(item => item.id === formData.itemId);
     
     if (!selectedItem) {
-      alert('Please select an item');
+      toast({
+        title: "Error",
+        description: "Please select an item",
+        variant: "destructive"
+      });
       return;
     }
 
     if (formData.quantity > selectedItem.quantity) {
-      alert(`Not enough stock! Only ${selectedItem.quantity} units available.`);
+      toast({
+        title: "Error",
+        description: `Not enough stock! Only ${selectedItem.quantity} units available.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!formData.personName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please enter a person name",
+        variant: "destructive"
+      });
       return;
     }
 
@@ -45,6 +96,15 @@ const ItemOutForm = ({ onSave, onCancel }) => {
   };
 
   const selectedItem = items.find(item => item.id === formData.itemId);
+
+  if (loading) {
+    return (
+      <div className="py-8 text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading available items...</p>
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -97,7 +157,7 @@ const ItemOutForm = ({ onSave, onCancel }) => {
         <input
           type="number"
           value={formData.quantity}
-          onChange={(e) => setFormData({ ...formData, quantity: parseInt(e.target.value) || 1 })}
+          onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) || 1 })}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           min="1"
           max={selectedItem ? selectedItem.quantity : 999}
