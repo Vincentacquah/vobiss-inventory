@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Sector } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { Calendar, TrendingUp, Download, Filter, RefreshCw, ChevronDown, ChevronUp, Settings, BarChart2, PieChart as PieChartIcon, Users } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useToast } from "@/hooks/use-toast";
@@ -12,6 +13,15 @@ interface UsageData {
   date: string;
   items: number;
   users: number;
+}
+
+/**
+ * Interface for tracking data during processing
+ */
+interface UsageTracking {
+  date: string;
+  items: number;
+  users: Set<string>;
 }
 
 /**
@@ -112,7 +122,7 @@ const Reports: React.FC = () => {
    */
   const generateUsageByDate = (itemsOutData: any[], days: number) => {
     // Create date map for the specified number of days
-    const dateMap: { [key: string]: UsageData } = {};
+    const dateMap: { [key: string]: UsageTracking } = {};
     const today = new Date();
     
     for (let i = days - 1; i >= 0; i--) {
@@ -124,7 +134,7 @@ const Reports: React.FC = () => {
         date: dateStr,
         items: 0,
         users: new Set<string>()
-      } as any;
+      };
     }
     
     // Fill in actual usage data
@@ -136,10 +146,11 @@ const Reports: React.FC = () => {
       }
     });
     
-    // Convert sets to counts
+    // Convert sets to counts for final data
     const result = Object.values(dateMap).map(entry => ({
-      ...entry,
-      users: entry.users && typeof entry.users.size === 'number' ? entry.users.size : 0
+      date: entry.date,
+      items: entry.items,
+      users: entry.users.size
     }));
     
     return result;
