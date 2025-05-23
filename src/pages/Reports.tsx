@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Sector } from 'recharts';
-import { Calendar, TrendingUp, Download, Filter, RefreshCw, ChevronDown, ChevronUp, Settings, BarChart2, PieChart as PieChartIcon } from 'lucide-react';
+import { Calendar, TrendingUp, Download, Filter, RefreshCw, ChevronDown, ChevronUp, Settings, BarChart2, PieChart as PieChartIcon, Users } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -124,7 +123,7 @@ const Reports: React.FC = () => {
       dateMap[dateStr] = {
         date: dateStr,
         items: 0,
-        users: new Set()
+        users: new Set<string>()
       } as any;
     }
     
@@ -133,14 +132,14 @@ const Reports: React.FC = () => {
       const dateStr = new Date(item.date_time).toISOString().split('T')[0];
       if (dateMap[dateStr]) {
         dateMap[dateStr].items += item.quantity;
-        (dateMap[dateStr].users as any).add(item.person_name);
+        dateMap[dateStr].users.add(item.person_name);
       }
     });
     
     // Convert sets to counts
     const result = Object.values(dateMap).map(entry => ({
       ...entry,
-      users: entry.users instanceof Set ? (entry.users as Set<string>).size : entry.users
+      users: entry.users && typeof entry.users.size === 'number' ? entry.users.size : 0
     }));
     
     return result;
@@ -475,7 +474,7 @@ const Reports: React.FC = () => {
                 </h2>
               </div>
               <ResponsiveContainer width="100%" height={300}>
-                {chartType === 'bar' && (
+                {chartType === 'bar' ? (
                   <BarChart data={usageData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" tick={{ fontSize: 12 }} />
@@ -485,8 +484,7 @@ const Reports: React.FC = () => {
                     <Bar dataKey="items" fill="#3B82F6" name="Items" />
                     <Bar dataKey="users" fill="#10B981" name="Users" />
                   </BarChart>
-                )}
-                {chartType === 'line' && (
+                ) : chartType === 'line' ? (
                   <LineChart data={usageData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                     <XAxis dataKey="date" tick={{ fontSize: 12 }} />
@@ -496,8 +494,7 @@ const Reports: React.FC = () => {
                     <Line type="monotone" dataKey="items" stroke="#3B82F6" name="Items" strokeWidth={2} />
                     <Line type="monotone" dataKey="users" stroke="#10B981" name="Users" strokeWidth={2} />
                   </LineChart>
-                )}
-                {chartType === 'pie' && (
+                ) : (
                   <PieChart>
                     <Pie
                       data={topItems}

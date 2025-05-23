@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, User, Bell, Shield, Database, Loader2, Check, X } from 'lucide-react';
+import { Settings as SettingsIcon, Save, User, Bell, Shield, Database, Loader2, Check, X, Download } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from '../integrations/supabase/client';
 import { Button } from "@/components/ui/button";
