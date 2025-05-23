@@ -1,56 +1,199 @@
 
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Package, TrendingDown } from 'lucide-react';
-import * as api from '../api';
+import { AlertTriangle, Package, TrendingDown, RefreshCw, Search, Filter, ShoppingBag, List, Grid } from 'lucide-react';
+import { supabase } from '../integrations/supabase/client';
+import { useToast } from "@/hooks/use-toast";
+import { Button } from "@/components/ui/button";
 
-const LowStockAlerts = () => {
-  const [lowStockItems, setLowStockItems] = useState([]);
-  const [categories, setCategories] = useState([]);
+/**
+ * Interface for inventory items
+ */
+interface Item {
+  id: string;
+  name: string;
+  description: string | null;
+  category_id: string | null;
+  quantity: number;
+  low_stock_threshold: number;
+}
 
+/**
+ * Interface for categories
+ */
+interface Category {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+/**
+ * LowStockAlerts Component
+ * Displays items that are below or near their low stock threshold
+ */
+const LowStockAlerts: React.FC = () => {
+  // State management
+  const [lowStockItems, setLowStockItems] = useState<Item[]>([]);
+  const [filteredItems, setFilteredItems] = useState<Item[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+  const { toast } = useToast();
+
+  // Load data on component mount
   useEffect(() => {
     loadData();
   }, []);
 
+  // Filter items when filters change
+  useEffect(() => {
+    filterItems();
+  }, [lowStockItems, searchTerm, categoryFilter, severityFilter]);
+
+  /**
+   * Loads low stock items and categories from Supabase
+   */
   const loadData = async () => {
     try {
-      const [items, categoriesData] = await Promise.all([
-        api.getLowStockItems(),
-        api.getCategories()
-      ]);
-      setLowStockItems(items);
-      setCategories(categoriesData);
+      setLoading(true);
+      
+      // Fetch all items to check stock levels
+      const { data: items, error: itemsError } = await supabase
+        .from('items')
+        .select('*');
+      
+      // Fetch all categories for filtering
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('categories')
+        .select('*');
+      
+      if (itemsError) throw itemsError;
+      if (categoriesError) throw categoriesError;
+      
+      // Filter items that are at or below their threshold
+      const lowStock = items?.filter(item => item.quantity <= item.low_stock_threshold) || [];
+      
+      setLowStockItems(lowStock);
+      setCategories(categoriesData || []);
     } catch (error) {
       console.error('Error loading low stock data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load low stock items",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const getCategoryName = (categoryId) => {
+  /**
+   * Filters items based on search term, category, and severity
+   */
+  const filterItems = () => {
+    let filtered = [...lowStockItems];
+    
+    // Apply search filter
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(item => 
+        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (item.description?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+      );
+    }
+    
+    // Apply category filter
+    if (categoryFilter !== 'all') {
+      filtered = filtered.filter(item => item.category_id === categoryFilter);
+    }
+    
+    // Apply severity filter
+    if (severityFilter !== 'all') {
+      switch (severityFilter) {
+        case 'critical':
+          // Critical: 0 or less than 50% of threshold
+          filtered = filtered.filter(item => 
+            item.quantity === 0 || item.quantity <= item.low_stock_threshold * 0.5
+          );
+          break;
+        case 'warning':
+          // Warning: Between 50% and 100% of threshold
+          filtered = filtered.filter(item => 
+            item.quantity > item.low_stock_threshold * 0.5 && item.quantity <= item.low_stock_threshold
+          );
+          break;
+      }
+    }
+    
+    setFilteredItems(filtered);
+  };
+
+  /**
+   * Gets the name of a category by ID
+   */
+  const getCategoryName = (categoryId: string | null): string => {
+    if (!categoryId) return 'Uncategorized';
     const category = categories.find(cat => cat.id === categoryId);
     return category ? category.name : 'Unknown';
   };
 
-  const getStockLevel = (quantity, threshold) => {
-    if (quantity <= 0) return { level: 'Out of Stock', color: 'bg-red-500' };
-    if (quantity <= threshold * 0.5) return { level: 'Critical', color: 'bg-red-500' };
-    if (quantity <= threshold) return { level: 'Low', color: 'bg-yellow-500' };
-    return { level: 'Normal', color: 'bg-green-500' };
+  /**
+   * Determines stock level status based on quantity and threshold
+   */
+  const getStockLevel = (quantity: number, threshold: number) => {
+    if (quantity <= 0) return { level: 'Out of Stock', color: 'bg-red-500', textColor: 'text-red-800', bgColor: 'bg-red-100' };
+    if (quantity <= threshold * 0.5) return { level: 'Critical', color: 'bg-red-500', textColor: 'text-red-800', bgColor: 'bg-red-100' };
+    if (quantity <= threshold) return { level: 'Low', color: 'bg-yellow-500', textColor: 'text-yellow-800', bgColor: 'bg-yellow-100' };
+    return { level: 'Normal', color: 'bg-green-500', textColor: 'text-green-800', bgColor: 'bg-green-100' };
+  };
+
+  /**
+   * Refreshes data from the database
+   */
+  const handleRefresh = () => {
+    loadData();
+    toast({
+      title: "Refreshing",
+      description: "Updating low stock items data",
+      variant: "default"
+    });
   };
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900">Low Stock Alerts</h1>
-        <p className="text-gray-600 mt-1">Items that need attention</p>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Low Stock Alerts</h1>
+          <p className="text-gray-600 mt-1">Items that need attention and restocking</p>
+        </div>
+        <div className="mt-4 md:mt-0 flex items-center space-x-2">
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+          <Button
+            variant="default"
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            <ShoppingBag className="h-4 w-4 mr-2" />
+            Order Supplies
+          </Button>
+        </div>
       </div>
 
       {/* Alert Summary */}
       <div className="bg-gradient-to-r from-red-50 to-yellow-50 border border-red-200 rounded-xl p-6 mb-6">
         <div className="flex items-center">
-          <AlertTriangle className="h-8 w-8 text-red-600 mr-3" />
+          <AlertTriangle className="h-8 w-8 text-red-600 mr-3 flex-shrink-0" />
           <div>
             <h2 className="text-lg font-semibold text-red-900">
-              {lowStockItems.length} items need attention
+              {lowStockItems.length} {lowStockItems.length === 1 ? 'item needs' : 'items need'} attention
             </h2>
             <p className="text-red-700">
               These items are running low and may need restocking soon.
@@ -59,60 +202,185 @@ const LowStockAlerts = () => {
         </div>
       </div>
 
-      {/* Low Stock Items */}
-      <div className="space-y-4">
-        {lowStockItems.map(item => {
-          const stockLevel = getStockLevel(item.quantity, item.lowStockThreshold);
+      {/* Filters */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* Search */}
+          <div className="relative">
+            <Search className="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search items..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
           
-          return (
-            <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <Package className="h-8 w-8 text-gray-400" />
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{item.name}</h3>
-                    <p className="text-sm text-gray-600">{getCategoryName(item.categoryId)}</p>
-                    <p className="text-sm text-gray-500 mt-1">{item.description}</p>
+          {/* Category Filter */}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Category</label>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">All Categories</option>
+              {categories.map(category => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+          </div>
+          
+          {/* Severity Filter */}
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Severity</label>
+            <select
+              value={severityFilter}
+              onChange={(e) => setSeverityFilter(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="all">All Levels</option>
+              <option value="critical">Critical</option>
+              <option value="warning">Warning</option>
+            </select>
+          </div>
+          
+          {/* View Mode Toggle */}
+          <div className="flex items-end">
+            <div className="w-full flex items-center justify-center border border-gray-300 rounded-lg overflow-hidden">
+              <button 
+                className={`flex-1 py-2 px-4 flex items-center justify-center ${viewMode === 'list' ? 'bg-blue-100 text-blue-800' : 'bg-white text-gray-600'}`}
+                onClick={() => setViewMode('list')}
+              >
+                <List className="h-5 w-5" />
+              </button>
+              <button 
+                className={`flex-1 py-2 px-4 flex items-center justify-center ${viewMode === 'grid' ? 'bg-blue-100 text-blue-800' : 'bg-white text-gray-600'}`}
+                onClick={() => setViewMode('grid')}
+              >
+                <Grid className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading low stock items...</p>
+        </div>
+      )}
+
+      {/* Low Stock Items - List View */}
+      {!loading && viewMode === 'list' && (
+        <div className="space-y-4">
+          {filteredItems.map(item => {
+            const stockLevel = getStockLevel(item.quantity, item.low_stock_threshold);
+            
+            return (
+              <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                <div className="flex flex-col md:flex-row md:items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className={`p-3 rounded-lg ${stockLevel.bgColor}`}>
+                      <Package className={`h-6 w-6 ${stockLevel.textColor}`} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">{item.name}</h3>
+                      <p className="text-sm text-gray-600">{getCategoryName(item.category_id)}</p>
+                      <p className="text-sm text-gray-500 mt-1">{item.description || 'No description available'}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="text-right mt-4 md:mt-0">
+                    <div className="flex items-center space-x-3 mb-2 justify-end">
+                      <div className={`w-3 h-3 rounded-full ${stockLevel.color}`}></div>
+                      <span className={`text-sm font-medium ${stockLevel.textColor}`}>{stockLevel.level}</span>
+                    </div>
+                    <div className="flex items-baseline space-x-2">
+                      <span className="text-2xl font-bold text-gray-900">{item.quantity}</span>
+                      <span className="text-sm text-gray-500">/ {item.low_stock_threshold}</span>
+                    </div>
                   </div>
                 </div>
                 
-                <div className="text-right">
-                  <div className="flex items-center space-x-3 mb-2">
-                    <div className={`w-3 h-3 rounded-full ${stockLevel.color}`}></div>
-                    <span className="text-sm font-medium text-gray-900">{stockLevel.level}</span>
+                {/* Progress Bar */}
+                <div className="mt-4">
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className={`h-2 rounded-full ${stockLevel.color}`}
+                      style={{ 
+                        width: `${Math.min(100, (item.quantity / item.low_stock_threshold) * 100)}%` 
+                      }}
+                    ></div>
                   </div>
-                  <div className="text-2xl font-bold text-gray-900">{item.quantity}</div>
-                  <div className="text-sm text-gray-500">
-                    Threshold: {item.lowStockThreshold}
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>0</span>
+                    <span>{item.low_stock_threshold}</span>
                   </div>
                 </div>
               </div>
-              
-              {/* Progress Bar */}
-              <div className="mt-4">
-                <div className="w-full bg-gray-200 rounded-full h-2">
+            );
+          })}
+        </div>
+      )}
+
+      {/* Low Stock Items - Grid View */}
+      {!loading && viewMode === 'grid' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredItems.map(item => {
+            const stockLevel = getStockLevel(item.quantity, item.low_stock_threshold);
+            
+            return (
+              <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`p-3 rounded-lg ${stockLevel.bgColor}`}>
+                    <Package className={`h-5 w-5 ${stockLevel.textColor}`} />
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className={`w-2 h-2 rounded-full ${stockLevel.color}`}></div>
+                    <span className={`text-xs font-medium ${stockLevel.textColor}`}>{stockLevel.level}</span>
+                  </div>
+                </div>
+                
+                <h3 className="text-lg font-semibold text-gray-900 mb-1">{item.name}</h3>
+                <p className="text-xs text-gray-600 mb-2">{getCategoryName(item.category_id)}</p>
+                
+                <div className="flex items-baseline space-x-2 mb-3">
+                  <span className="text-2xl font-bold text-gray-900">{item.quantity}</span>
+                  <span className="text-sm text-gray-500">/ {item.low_stock_threshold}</span>
+                </div>
+                
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
                   <div
                     className={`h-2 rounded-full ${stockLevel.color}`}
                     style={{ 
-                      width: `${Math.min(100, (item.quantity / item.lowStockThreshold) * 100)}%` 
+                      width: `${Math.min(100, (item.quantity / item.low_stock_threshold) * 100)}%` 
                     }}
                   ></div>
                 </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>0</span>
-                  <span>{item.lowStockThreshold}</span>
-                </div>
+                
+                <p className="text-xs text-gray-500 line-clamp-2 mt-2">
+                  {item.description || 'No description available'}
+                </p>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-      {lowStockItems.length === 0 && (
-        <div className="text-center py-12">
-          <TrendingDown className="h-12 w-12 text-green-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">All items are well stocked!</h3>
-          <p className="text-gray-600">No items are currently below their low stock threshold.</p>
+      {/* Empty State */}
+      {!loading && filteredItems.length === 0 && (
+        <div className="text-center py-12 bg-white rounded-xl border border-gray-200 shadow-sm">
+          <TrendingDown className="h-16 w-16 text-green-500 mx-auto mb-4" />
+          <h3 className="text-xl font-medium text-gray-900 mb-2">All items are well stocked!</h3>
+          <p className="text-gray-600 max-w-md mx-auto">
+            {searchTerm || categoryFilter !== 'all' || severityFilter !== 'all' 
+              ? 'No items match your current filters. Try adjusting your search criteria.'
+              : 'No items are currently below their low stock threshold.'}
+          </p>
         </div>
       )}
     </div>

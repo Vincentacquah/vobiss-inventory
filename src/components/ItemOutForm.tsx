@@ -4,6 +4,9 @@ import { supabase } from '../integrations/supabase/client';
 import { useToast } from "@/hooks/use-toast";
 import type { Database } from '../integrations/supabase/types';
 
+/**
+ * Interface representing an item in inventory
+ */
 interface Item {
   id: string;
   name: string;
@@ -11,6 +14,9 @@ interface Item {
   quantity: number;
 }
 
+/**
+ * Props for the ItemOutForm component
+ */
 interface ItemOutFormProps {
   onSave: (data: {
     personName: string;
@@ -22,27 +28,44 @@ interface ItemOutFormProps {
   onCancel: () => void;
 }
 
+/**
+ * Form component for checking out items from inventory
+ * Allows users to select an item and specify quantity to be issued
+ * 
+ * @param {ItemOutFormProps} props - Component props
+ * @returns {React.FC} The ItemOutForm component
+ */
 const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
+  // State for form data
   const [formData, setFormData] = useState({
     personName: '',
     itemId: '',
     quantity: 1
   });
+  
+  // State for available items
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const { toast } = useToast();
 
+  // Load items when component mounts
   useEffect(() => {
     loadItems();
   }, []);
 
+  /**
+   * Fetches available items from database
+   * Only loads items with quantity greater than 0
+   */
   const loadItems = async () => {
     try {
       setLoading(true);
+      
+      // Fetch items with quantity > 0
       const { data, error } = await supabase
         .from('items')
         .select('*')
-        .gt('quantity', 0) as { data: Item[] | null, error: any };
+        .gt('quantity', 0);
       
       if (error) throw error;
       setItems(data || []);
@@ -58,10 +81,17 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
     }
   };
 
+  /**
+   * Handles form submission
+   * Validates input and calls onSave callback
+   * 
+   * @param {React.FormEvent} e - The form event
+   */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const selectedItem = items.find(item => item.id === formData.itemId);
     
+    // Validation checks
     if (!selectedItem) {
       toast({
         title: "Error",
@@ -89,6 +119,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
       return;
     }
 
+    // Call the onSave callback with form data
     onSave({
       ...formData,
       itemName: selectedItem.name,
@@ -96,8 +127,10 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
     });
   };
 
+  // Get the currently selected item
   const selectedItem = items.find(item => item.id === formData.itemId);
 
+  // Show loading state
   if (loading) {
     return (
       <div className="py-8 text-center">
@@ -109,6 +142,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Person Name Field */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Person Name *
@@ -123,6 +157,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
         />
       </div>
 
+      {/* Item Selection Dropdown */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Item *
@@ -142,8 +177,9 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
         </select>
       </div>
 
+      {/* Display selected item details */}
       {selectedItem && (
-        <div className="bg-gray-50 p-3 rounded-lg">
+        <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
           <p className="text-sm text-gray-700">
             <strong>Available Stock:</strong> {selectedItem.quantity} units
           </p>
@@ -151,6 +187,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
         </div>
       )}
 
+      {/* Quantity Field */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Quantity *
@@ -166,6 +203,7 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
         />
       </div>
 
+      {/* Form Buttons */}
       <div className="flex justify-end space-x-3 pt-4">
         <button
           type="button"
