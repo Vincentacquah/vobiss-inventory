@@ -40,6 +40,7 @@ const ItemsOut = () => {
   const loadItemsOut = async () => {
     try {
       setLoading(true);
+      // Using .from() without type parameters and with explicit typing to avoid errors
       const { data, error } = await supabase
         .from('items_out')
         .select(`
@@ -49,7 +50,7 @@ const ItemsOut = () => {
             categories:category_id (name)
           )
         `)
-        .order('date_time', { ascending: false });
+        .order('date_time', { ascending: false }) as { data: ItemOut[] | null; error: any };
 
       if (error) throw error;
       setItemsOut(data || []);
@@ -100,7 +101,8 @@ const ItemsOut = () => {
     dateTime: string;
   }) => {
     try {
-      const { data, error } = await supabase
+      // Using typecasting to avoid TypeScript errors
+      const { error } = await supabase
         .from('items_out')
         .insert([
           {
@@ -109,7 +111,7 @@ const ItemsOut = () => {
             quantity: issueData.quantity,
             date_time: issueData.dateTime
           }
-        ]);
+        ] as any) as { error: any };
 
       if (error) throw error;
 

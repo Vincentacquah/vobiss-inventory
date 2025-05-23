@@ -40,7 +40,7 @@ const AIAssistant = () => {
         if (itemType) {
           const matchingItems = items.filter(item => 
             item.name.toLowerCase().includes(itemType) ||
-            item.description?.toLowerCase().includes(itemType)
+            (item.description?.toLowerCase() || '').includes(itemType)
           );
           
           if (matchingItems.length > 0) {
@@ -64,7 +64,7 @@ const AIAssistant = () => {
         });
         
         const sortedUsers = Object.entries(userCounts)
-          .sort(([,a], [,b]) => b - a)
+          .sort(([,a], [,b]) => Number(b) - Number(a))
           .slice(0, 5);
         
         if (sortedUsers.length === 0) {
@@ -111,7 +111,7 @@ const AIAssistant = () => {
         });
         
         const mostPopular = Object.entries(itemCounts)
-          .sort(([,a], [,b]) => b - a)[0];
+          .sort(([,a], [,b]) => Number(b) - Number(a))[0];
         
         return `Weekly Summary:\n\n• ${uniqueUsers} people took ${totalItems} items\n• Most popular item: ${mostPopular ? `${mostPopular[0]} (${mostPopular[1]} taken)` : 'None'}\n• Active categories: ${categories.length}\n• Current stock levels: ${items.length} different items`;
       }

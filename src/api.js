@@ -5,6 +5,7 @@ import { supabase } from './integrations/supabase/client';
 // Items API
 export const getItems = async () => {
   try {
+    // Using explicit type casting to avoid TypeScript errors
     const { data, error } = await supabase
       .from('items')
       .select(`

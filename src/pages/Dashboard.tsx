@@ -21,6 +21,16 @@ interface RecentActivity {
   dateTime: string;
 }
 
+interface ItemOut {
+  id: string;
+  person_name: string;
+  quantity: number;
+  date_time: string;
+  items: {
+    name: string;
+  };
+}
+
 const Dashboard = () => {
   const [stats, setStats] = useState<Stats>({
     totalItems: 0,
@@ -42,10 +52,11 @@ const Dashboard = () => {
     try {
       setLoading(true);
       
+      // Using typecasting to avoid TypeScript errors
       const [itemsResponse, categoriesResponse, itemsOutResponse] = await Promise.all([
-        supabase.from('items').select('*'),
-        supabase.from('categories').select('*'),
-        supabase.from('items_out').select('*')
+        supabase.from('items').select('*') as Promise<{ data: any[] | null; error: any }>,
+        supabase.from('categories').select('*') as Promise<{ data: any[] | null; error: any }>,
+        supabase.from('items_out').select('*') as Promise<{ data: any[] | null; error: any }>
       ]);
 
       const items = itemsResponse.data || [];
@@ -66,7 +77,7 @@ const Dashboard = () => {
         .from('items_out')
         .select('*, items:item_id(name)')
         .order('date_time', { ascending: false })
-        .limit(5);
+        .limit(5) as { data: ItemOut[] | null; error: any };
 
       if (recentActivities.data) {
         setRecentActivity(recentActivities.data.map(activity => ({
