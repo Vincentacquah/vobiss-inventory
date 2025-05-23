@@ -2,11 +2,17 @@
 import React, { useState, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
 
+/**
+ * Interface for Category object structure
+ */
 interface Category {
   id: string;
   name: string;
 }
 
+/**
+ * Interface for ItemForm component props
+ */
 interface ItemFormProps {
   item?: {
     id?: string;
@@ -27,7 +33,15 @@ interface ItemFormProps {
   onCancel: () => void;
 }
 
+/**
+ * ItemForm Component
+ * Provides a form for creating or editing inventory items
+ * 
+ * @param {ItemFormProps} props - Component props
+ * @returns {JSX.Element} The rendered form
+ */
 const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel }) => {
+  // State to manage form data
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -35,8 +49,11 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
     quantity: 0,
     lowStockThreshold: 10
   });
+  
+  // Access toast functionality
   const { toast } = useToast();
 
+  // Populate form with existing item data when editing
   useEffect(() => {
     if (item) {
       setFormData({
@@ -49,8 +66,16 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
     }
   }, [item]);
 
+  /**
+   * Handle form submission
+   * Validates required fields before saving
+   * 
+   * @param {React.FormEvent} e - Form submit event
+   */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate required fields
     if (!formData.name.trim()) {
       toast({
         title: "Error",
@@ -59,6 +84,7 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
       });
       return;
     }
+    
     if (!formData.categoryId) {
       toast({
         title: "Error",
@@ -67,11 +93,17 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
       });
       return;
     }
+    
+    // Save the form data
     onSave(formData);
   };
 
+  // Display the selected category name for debugging
+  const selectedCategory = categories.find(cat => cat.id === formData.categoryId);
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Item Name Field */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Item Name *
@@ -85,6 +117,7 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         />
       </div>
 
+      {/* Description Field */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Description
@@ -97,6 +130,7 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         />
       </div>
 
+      {/* Category Selection */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Category *
@@ -112,8 +146,14 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
             <option key={category.id} value={category.id}>{category.name}</option>
           ))}
         </select>
+        {selectedCategory && (
+          <p className="text-xs text-blue-600 mt-1">
+            Selected category: {selectedCategory.name}
+          </p>
+        )}
       </div>
 
+      {/* Quantity and Low Stock Threshold Fields */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -143,6 +183,7 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         </div>
       </div>
 
+      {/* Form Actions */}
       <div className="flex justify-end space-x-3 pt-4">
         <button
           type="button"

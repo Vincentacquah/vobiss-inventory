@@ -4,8 +4,16 @@ import { Plus, Search, Edit, Trash2, Package } from 'lucide-react';
 import * as api from '../api';
 import Modal from '../components/Modal';
 import ItemForm from '../components/ItemForm';
+import { useToast } from "@/hooks/use-toast";
 
+/**
+ * Inventory Component
+ * Manages and displays inventory items with filtering, adding, editing, and deletion capabilities
+ * 
+ * @returns {JSX.Element} The rendered inventory page
+ */
 const Inventory = () => {
+  // State management
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
   const [filteredItems, setFilteredItems] = useState([]);
@@ -13,28 +21,44 @@ const Inventory = () => {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const { toast } = useToast();
 
+  // Load initial data
   useEffect(() => {
     loadData();
   }, []);
 
+  // Apply filters whenever items, searchTerm, or selectedCategory changes
   useEffect(() => {
     filterItems();
   }, [items, searchTerm, selectedCategory]);
 
+  /**
+   * Load items and categories data from API
+   */
   const loadData = async () => {
     try {
       const [itemsData, categoriesData] = await Promise.all([
         api.getItems(),
         api.getCategories()
       ]);
+      console.log('Loaded items:', itemsData);
+      console.log('Loaded categories:', categoriesData);
       setItems(itemsData);
       setCategories(categoriesData);
     } catch (error) {
       console.error('Error loading data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load inventory data",
+        variant: "destructive"
+      });
     }
   };
 
+  /**
+   * Filter items based on search term and selected category
+   */
   const filterItems = () => {
     let filtered = items;
 
@@ -52,37 +76,82 @@ const Inventory = () => {
     setFilteredItems(filtered);
   };
 
+  /**
+   * Handle saving an item (add or update)
+   * 
+   * @param {Object} itemData - The item data to save
+   */
   const handleSaveItem = async (itemData) => {
     try {
       if (editingItem) {
         await api.updateItem(editingItem.id, itemData);
+        toast({
+          title: "Success",
+          description: "Item updated successfully",
+        });
       } else {
         await api.addItem(itemData);
+        toast({
+          title: "Success",
+          description: "Item added successfully",
+        });
       }
       setIsModalOpen(false);
       setEditingItem(null);
       loadData();
     } catch (error) {
       console.error('Error saving item:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save item",
+        variant: "destructive"
+      });
     }
   };
 
+  /**
+   * Handle deleting an item
+   * 
+   * @param {string} itemId - ID of the item to delete
+   */
   const handleDeleteItem = async (itemId) => {
     if (window.confirm('Are you sure you want to delete this item?')) {
       try {
         await api.deleteItem(itemId);
+        toast({
+          title: "Success",
+          description: "Item deleted successfully",
+        });
         loadData();
       } catch (error) {
         console.error('Error deleting item:', error);
+        toast({
+          title: "Error",
+          description: "Failed to delete item",
+          variant: "destructive"
+        });
       }
     }
   };
 
+  /**
+   * Get category name by ID
+   * 
+   * @param {string} categoryId - The category ID
+   * @returns {string} The category name
+   */
   const getCategoryName = (categoryId) => {
     const category = categories.find(cat => cat.id === categoryId);
     return category ? category.name : 'Unknown';
   };
 
+  /**
+   * Get CSS classes for stock status display
+   * 
+   * @param {number} quantity - Current stock quantity
+   * @param {number} lowStockThreshold - Low stock threshold value
+   * @returns {string} CSS class names
+   */
   const getStockStatusColor = (quantity, lowStockThreshold = 10) => {
     if (quantity <= 0) return 'text-red-600 bg-red-50';
     if (quantity <= lowStockThreshold) return 'text-yellow-600 bg-yellow-50';
@@ -147,12 +216,14 @@ const Inventory = () => {
                     setIsModalOpen(true);
                   }}
                   className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+                  aria-label="Edit item"
                 >
                   <Edit className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => handleDeleteItem(item.id)}
                   className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                  aria-label="Delete item"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -160,11 +231,15 @@ const Inventory = () => {
             </div>
             
             <h3 className="text-lg font-semibold text-gray-900 mb-2">{item.name}</h3>
-            <p className="text-sm text-gray-600 mb-3">{item.description}</p>
+            {item.description && (
+              <p className="text-sm text-gray-600 mb-3">{item.description}</p>
+            )}
             
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-medium text-gray-700">Category</span>
-              <span className="text-sm text-gray-600">{getCategoryName(item.categoryId)}</span>
+              <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
+                {getCategoryName(item.categoryId)}
+              </span>
             </div>
             
             <div className="flex items-center justify-between">
