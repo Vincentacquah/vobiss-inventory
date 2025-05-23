@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, ArrowUpRight, Calendar, User } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
@@ -40,8 +39,7 @@ const ItemsOut = () => {
   const loadItemsOut = async () => {
     try {
       setLoading(true);
-      // Using proper type assertions for Supabase response
-      const response = await supabase
+      const { data, error } = await supabase
         .from('items_out')
         .select(`
           *,
@@ -50,10 +48,7 @@ const ItemsOut = () => {
             categories:category_id (name)
           )
         `)
-        .order('date_time', { ascending: false });
-        
-      const data = response.data as ItemOut[] | null;
-      const error = response.error;
+        .order('date_time', { ascending: false }) as { data: ItemOut[] | null, error: any };
 
       if (error) throw error;
       setItemsOut(data || []);
@@ -104,8 +99,7 @@ const ItemsOut = () => {
     dateTime: string;
   }) => {
     try {
-      // Using proper type assertion for Supabase insert
-      const response = await supabase
+      const { error } = await supabase
         .from('items_out')
         .insert([
           {
@@ -114,9 +108,7 @@ const ItemsOut = () => {
             quantity: issueData.quantity,
             date_time: issueData.dateTime
           }
-        ]);
-      
-      const error = response.error;
+        ]) as { error: any };
 
       if (error) throw error;
 

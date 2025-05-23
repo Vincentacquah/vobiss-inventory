@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Package, Tags, ArrowUpRight, AlertTriangle, TrendingUp, Users } from 'lucide-react';
 import { supabase } from '../integrations/supabase/client';
@@ -53,13 +52,9 @@ const Dashboard = () => {
       setLoading(true);
       
       // Using proper type assertions for Supabase responses
-      const itemsResponse = await supabase.from('items').select('*');
-      const categoriesResponse = await supabase.from('categories').select('*');
-      const itemsOutResponse = await supabase.from('items_out').select('*');
-
-      const items = itemsResponse.data || [];
-      const categories = categoriesResponse.data || [];
-      const itemsOut = itemsOutResponse.data || [];
+      const { data: items = [] } = await supabase.from('items').select('*') as { data: any[] };
+      const { data: categories = [] } = await supabase.from('categories').select('*') as { data: any[] };
+      const { data: itemsOut = [] } = await supabase.from('items_out').select('*') as { data: any[] };
       
       const lowStock = items.filter(item => item.quantity <= item.low_stock_threshold);
 
@@ -71,13 +66,11 @@ const Dashboard = () => {
       });
 
       // Get recent activities with item names
-      const recentActivitiesResponse = await supabase
+      const { data: recentActivitiesData } = await supabase
         .from('items_out')
         .select('*, items:item_id(name)')
         .order('date_time', { ascending: false })
-        .limit(5);
-      
-      const recentActivitiesData = recentActivitiesResponse.data as ItemOut[] | null;
+        .limit(5) as { data: ItemOut[] | null, error: any };
 
       if (recentActivitiesData) {
         setRecentActivity(recentActivitiesData.map(activity => ({

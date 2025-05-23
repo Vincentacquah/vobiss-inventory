@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { useToast } from "@/hooks/use-toast";
+import type { Database } from '../integrations/supabase/types';
 
 interface Item {
   id: string;
@@ -38,16 +39,11 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
   const loadItems = async () => {
     try {
       setLoading(true);
-      // Using type assertions to handle the empty database schema
-      const response = await supabase
+      const { data, error } = await supabase
         .from('items')
         .select('*')
-        .gt('quantity', 0);
+        .gt('quantity', 0) as { data: Item[] | null, error: any };
       
-      // Type assertions to maintain compatibility
-      const data = response.data as Item[] | null;
-      const error = response.error;
-
       if (error) throw error;
       setItems(data || []);
     } catch (error) {

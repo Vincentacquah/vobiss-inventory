@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Send, Bot } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
@@ -7,6 +8,19 @@ interface Message {
   id: string;
   text: string;
   isUser: boolean;
+}
+
+interface Item {
+  id: string;
+  name: string;
+  description: string | null;
+  category_id: string | null;
+}
+
+interface ItemOut {
+  person_name: string;
+  item_id: string;
+  quantity: number;
 }
 
 const AIAssistant: React.FC = () => {
@@ -55,11 +69,11 @@ const AIAssistant: React.FC = () => {
     // Fetch all items and items_out data
     const { data: items, error: itemsError } = await supabase
       .from('items')
-      .select('*');
+      .select('*') as { data: Item[] | null, error: any };
 
     const { data: itemsOut, error: itemsOutError } = await supabase
       .from('items_out')
-      .select('person_name, item_id, quantity');
+      .select('person_name, item_id, quantity') as { data: ItemOut[] | null, error: any };
 
     if (itemsError || itemsOutError) {
       console.error("Error fetching data:", itemsError, itemsOutError);
@@ -101,7 +115,7 @@ const AIAssistant: React.FC = () => {
       });
 
       const sortedUsers = Object.entries(userCounts)
-        .sort(([,a], [,b]) => Number(b) - Number(a))
+        .sort(([, a], [, b]) => b - a)
         .slice(0, 5);
 
       if (sortedUsers.length > 0) {
@@ -120,7 +134,7 @@ const AIAssistant: React.FC = () => {
       });
 
       const mostPopular = Object.entries(itemCounts)
-        .sort(([,a], [,b]) => Number(b) - Number(a))[0];
+        .sort(([, a], [, b]) => b - a)[0];
 
       if (mostPopular) {
         addMessage(`Most popular item: ${mostPopular[0]}`, false);
@@ -138,7 +152,7 @@ const AIAssistant: React.FC = () => {
     } else if (lowerQuery.includes("weekly summary")) {
       getWeeklySummary();
     } else {
-      addMessage("I'm sorry, I don't understand that command.", false);
+      addMessage("I'm sorry, I don't understand that command. Try asking me to 'search for [item]', show 'user stats', or provide a 'weekly summary'.", false);
     }
   };
 
