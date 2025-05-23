@@ -52,12 +52,10 @@ const Dashboard = () => {
     try {
       setLoading(true);
       
-      // Using typecasting to avoid TypeScript errors
-      const [itemsResponse, categoriesResponse, itemsOutResponse] = await Promise.all([
-        supabase.from('items').select('*') as Promise<{ data: any[] | null; error: any }>,
-        supabase.from('categories').select('*') as Promise<{ data: any[] | null; error: any }>,
-        supabase.from('items_out').select('*') as Promise<{ data: any[] | null; error: any }>
-      ]);
+      // Using proper type assertions for Supabase responses
+      const itemsResponse = await supabase.from('items').select('*');
+      const categoriesResponse = await supabase.from('categories').select('*');
+      const itemsOutResponse = await supabase.from('items_out').select('*');
 
       const items = itemsResponse.data || [];
       const categories = categoriesResponse.data || [];
@@ -73,14 +71,16 @@ const Dashboard = () => {
       });
 
       // Get recent activities with item names
-      const recentActivities = await supabase
+      const recentActivitiesResponse = await supabase
         .from('items_out')
         .select('*, items:item_id(name)')
         .order('date_time', { ascending: false })
-        .limit(5) as { data: ItemOut[] | null; error: any };
+        .limit(5);
+      
+      const recentActivitiesData = recentActivitiesResponse.data as ItemOut[] | null;
 
-      if (recentActivities.data) {
-        setRecentActivity(recentActivities.data.map(activity => ({
+      if (recentActivitiesData) {
+        setRecentActivity(recentActivitiesData.map(activity => ({
           id: activity.id,
           personName: activity.person_name,
           quantity: activity.quantity,

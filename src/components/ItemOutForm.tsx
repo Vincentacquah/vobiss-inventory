@@ -38,11 +38,15 @@ const ItemOutForm: React.FC<ItemOutFormProps> = ({ onSave, onCancel }) => {
   const loadItems = async () => {
     try {
       setLoading(true);
-      // Using .from() without type parameters to avoid TypeScript errors
-      const { data, error } = await supabase
+      // Using type assertions to handle the empty database schema
+      const response = await supabase
         .from('items')
         .select('*')
-        .gt('quantity', 0) as { data: Item[] | null; error: any };
+        .gt('quantity', 0);
+      
+      // Type assertions to maintain compatibility
+      const data = response.data as Item[] | null;
+      const error = response.error;
 
       if (error) throw error;
       setItems(data || []);
