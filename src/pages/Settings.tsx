@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Save, User, Bell, Shield, Database, Loader2, Check, X, Download } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from '../integrations/supabase/client';
+import { getItems, getCategories, getItemsOut, addItem, updateItem, deleteItem, issueItem, getLowStockItems, getDashboardStats } from '../api';
 import { Button } from "@/components/ui/button";
 
 /**

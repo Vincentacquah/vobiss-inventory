@@ -1,0 +1,4 @@
+SUPABASE_URL=https://srvvomvtrlnsyrzujazp.supabase.co
+SUPABASE_KEY=eyJHbGc101JUJZi1NItsiNR5CiG1tkPXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNydnZvbXZ0cmxuc3lyenVqYXpwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTcyNzMyMDExNSwiZXhwIjoxMDQyNjAwMTE1fQ.pC3M1f01J2dXbI
+PORT=3001
+

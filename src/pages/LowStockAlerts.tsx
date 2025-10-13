@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle, Package, TrendingDown, RefreshCw, Search, Filter, ShoppingBag, List, Grid } from 'lucide-react';
-import { supabase } from '../integrations/supabase/client';
+import { getItems, getCategories, getItemsOut, addItem, updateItem, deleteItem, issueItem, getLowStockItems, getDashboardStats } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 
@@ -53,29 +52,19 @@ const LowStockAlerts: React.FC = () => {
   }, [lowStockItems, searchTerm, categoryFilter, severityFilter]);
 
   /**
-   * Loads low stock items and categories from Supabase
+   * Loads low stock items and categories from API
    */
   const loadData = async () => {
     try {
       setLoading(true);
       
-      // Fetch all items to check stock levels
-      const { data: items, error: itemsError } = await supabase
-        .from('items')
-        .select('*');
+      // Fetch low stock items and categories
+      const [items, categoriesData] = await Promise.all([
+        getLowStockItems(),
+        getCategories()
+      ]);
       
-      // Fetch all categories for filtering
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from('categories')
-        .select('*');
-      
-      if (itemsError) throw itemsError;
-      if (categoriesError) throw categoriesError;
-      
-      // Filter items that are at or below their threshold
-      const lowStock = items?.filter(item => item.quantity <= item.low_stock_threshold) || [];
-      
-      setLowStockItems(lowStock);
+      setLowStockItems(items || []);
       setCategories(categoriesData || []);
     } catch (error) {
       console.error('Error loading low stock data:', error);

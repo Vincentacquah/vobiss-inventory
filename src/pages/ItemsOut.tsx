@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, ArrowUpRight, Calendar, User, Download, Filter } from 'lucide-react';
-import { supabase } from '../integrations/supabase/client';
+import { getItems, getCategories, getItemsOut, addItem, updateItem, deleteItem, issueItem, getLowStockItems, getDashboardStats } from '../api';
 import Modal from '../components/Modal';
 import ItemOutForm from '../components/ItemOutForm';
 import { useToast } from "@/hooks/use-toast";
@@ -16,12 +15,8 @@ interface ItemOut {
   item_id: string;
   quantity: number;
   date_time: string;
-  items?: {
-    name: string;
-    categories?: {
-      name: string;
-    };
-  };
+  item_name: string;
+  category_name: string;
 }
 
 /**
@@ -29,7 +24,6 @@ interface ItemOut {
  * Manages the tracking and issuing of items taken from inventory
  */
 const ItemsOut = () => {
-  // State management
   const [itemsOut, setItemsOut] = useState<ItemOut[]>([]);
   const [filteredItemsOut, setFilteredItemsOut] = useState<ItemOut[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,39 +32,19 @@ const ItemsOut = () => {
   const { toast } = useToast();
   const [filterDate, setFilterDate] = useState<string>('all');
 
-  // Load data on component mount and set up real-time subscriptions
   useEffect(() => {
     loadItemsOut();
-    const unsubscribe = subscribeToChanges();
-    return () => unsubscribe();
   }, []);
 
-  // Filter items when search term or items data changes
   useEffect(() => {
     filterItemsOut();
   }, [itemsOut, searchTerm, filterDate]);
 
-  /**
-   * Loads items out data from Supabase
-   * Includes item details and category information
-   */
   const loadItemsOut = async () => {
     try {
       setLoading(true);
-      // Fetch items out with related data
-      const { data, error } = await supabase
-        .from('items_out')
-        .select(`
-          *,
-          items:item_id (
-            name, 
-            categories:category_id (name)
-          )
-        `)
-        .order('date_time', { ascending: false });
-
-      if (error) throw error;
-      setItemsOut(data || []);
+      const itemsOut = await getItemsOut();
+      setItemsOut(itemsOut || []);
     } catch (error) {
       console.error('Error loading items out:', error);
       toast({
@@ -83,38 +57,16 @@ const ItemsOut = () => {
     }
   };
 
-  /**
-   * Sets up real-time subscription to items_out table changes
-   * @returns Function to unsubscribe from channel
-   */
-  const subscribeToChanges = () => {
-    const itemsOutChannel = supabase
-      .channel('public:items_out')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'items_out' }, () => {
-        loadItemsOut();
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(itemsOutChannel);
-    };
-  };
-
-  /**
-   * Filters items based on search term and date filter
-   */
   const filterItemsOut = () => {
     let filtered = [...itemsOut];
     
-    // Apply search filter
     if (searchTerm.trim()) {
       filtered = filtered.filter(item =>
         (item.person_name && item.person_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.items?.name && item.items.name.toLowerCase().includes(searchTerm.toLowerCase()))
+        (item.item_name && item.item_name.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
 
-    // Apply date filter
     if (filterDate !== 'all') {
       const today = new Date();
       const filterDays = parseInt(filterDate);
@@ -132,73 +84,52 @@ const ItemsOut = () => {
     setFilteredItemsOut(filtered);
   };
 
-  /**
-   * Handles issuing a new item
-   * Creates record in items_out table and updates item quantity
-   * 
-   * @param issueData Object containing data about the item being issued
-   */
   const handleIssueItem = async (issueData: {
     personName: string;
-    itemId: string;
+    itemId: string | number;
     quantity: number;
     itemName: string;
     dateTime: string;
   }) => {
     try {
-      // Insert new record into items_out table
-      const { error } = await supabase
-        .from('items_out')
-        .insert([
-          {
-            person_name: issueData.personName,
-            item_id: issueData.itemId,
-            quantity: issueData.quantity,
-            date_time: issueData.dateTime
-          }
-        ]);
-
-      if (error) throw error;
-
+      await issueItem({
+        personName: issueData.personName,
+        itemId: issueData.itemId,
+        quantity: issueData.quantity,
+        dateTime: issueData.dateTime,
+      });
       setIsModalOpen(false);
       toast({
         title: "Success",
         description: `${issueData.quantity} x ${issueData.itemName} issued to ${issueData.personName}`,
         variant: "default"
       });
-      
-      // Item quantity will be updated automatically by the database trigger
+      await loadItemsOut(); // Refresh the items out list
     } catch (error) {
       console.error('Error issuing item:', error);
       toast({
         title: "Error",
-        description: "Failed to issue item",
+        description: error.message || "Failed to issue item",
         variant: "destructive"
       });
     }
   };
 
-  /**
-   * Exports items out data to CSV
-   */
   const exportToCSV = () => {
-    // Create CSV content
     const headers = ["Person Name", "Item", "Category", "Quantity", "Date/Time"];
     const rows = filteredItemsOut.map(item => [
       item.person_name,
-      item.items?.name || "Unknown",
-      item.items?.categories?.name || "Unknown",
+      item.item_name,
+      item.category_name,
       item.quantity,
       new Date(item.date_time).toLocaleString()
     ]);
     
-    // Convert to CSV string
     const csvContent = [
       headers.join(","),
       ...rows.map(row => row.join(","))
     ].join("\n");
     
-    // Create download link
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -212,7 +143,6 @@ const ItemsOut = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Items Out</h1>
@@ -237,7 +167,6 @@ const ItemsOut = () => {
         </div>
       </div>
 
-      {/* Search and Filter */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6">
         <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
           <div className="relative flex-1">
@@ -267,7 +196,6 @@ const ItemsOut = () => {
         </div>
       </div>
 
-      {/* Loading State */}
       {loading && (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
@@ -275,28 +203,17 @@ const ItemsOut = () => {
         </div>
       )}
 
-      {/* Items Out Table */}
       {!loading && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Person
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Item
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Quantity
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date & Time
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Person</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -311,8 +228,8 @@ const ItemsOut = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{item.items?.name || "Unknown Item"}</div>
-                      <div className="text-sm text-gray-500">{item.items?.categories?.name || "Unknown Category"}</div>
+                      <div className="text-sm text-gray-900">{item.item_name}</div>
+                      <div className="text-sm text-gray-500">{item.category_name}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{item.quantity}</div>
@@ -347,7 +264,6 @@ const ItemsOut = () => {
         </div>
       )}
 
-      {/* Issue Item Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

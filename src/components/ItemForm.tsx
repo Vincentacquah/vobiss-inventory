@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useToast } from "@/hooks/use-toast";
 
@@ -46,8 +45,8 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
     name: '',
     description: '',
     categoryId: '',
-    quantity: 0,
-    lowStockThreshold: 10
+    quantity: '',
+    lowStockThreshold: ''
   });
   
   // Access toast functionality
@@ -60,8 +59,17 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
         name: item.name || '',
         description: item.description || '',
         categoryId: item.categoryId || '',
-        quantity: item.quantity || 0,
-        lowStockThreshold: item.lowStockThreshold || 10
+        quantity: item.quantity > 0 ? item.quantity.toString() : '', // Show empty if 0
+        lowStockThreshold: item.lowStockThreshold > 0 ? item.lowStockThreshold.toString() : ''
+      });
+    } else {
+      // For new item, reset to empty strings
+      setFormData({
+        name: '',
+        description: '',
+        categoryId: '',
+        quantity: '',
+        lowStockThreshold: ''
       });
     }
   }, [item]);
@@ -93,9 +101,25 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
       });
       return;
     }
+
+    const qty = Number(formData.quantity);
+    if (!formData.quantity.trim() || isNaN(qty) || qty < 0) {
+      toast({
+        title: "Error",
+        description: "Please enter a valid quantity (non-negative number)",
+        variant: "destructive"
+      });
+      return;
+    }
     
     // Save the form data
-    onSave(formData);
+    onSave({
+      name: formData.name,
+      description: formData.description,
+      categoryId: formData.categoryId,
+      quantity: qty,
+      lowStockThreshold: formData.lowStockThreshold ? Number(formData.lowStockThreshold) : 0
+    });
   };
 
   // Display the selected category name for debugging
@@ -162,9 +186,11 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           <input
             type="number"
             value={formData.quantity}
-            onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) || 0 })}
+            onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             min="0"
+            step="1"
+            placeholder="Enter quantity"
             required
           />
         </div>
@@ -176,9 +202,11 @@ const ItemForm: React.FC<ItemFormProps> = ({ item, categories, onSave, onCancel 
           <input
             type="number"
             value={formData.lowStockThreshold}
-            onChange={(e) => setFormData({ ...formData, lowStockThreshold: Number(e.target.value) || 0 })}
+            onChange={(e) => setFormData({ ...formData, lowStockThreshold: e.target.value })}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             min="0"
+            step="1"
+            placeholder="Enter threshold"
           />
         </div>
       </div>
