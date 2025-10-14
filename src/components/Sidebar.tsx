@@ -17,7 +17,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
 
   const menuItems = [
     { icon: BarChart3, label: 'Dashboard', path: '/' },
-    { icon: Package, label: 'Inventory', path: '/inventory' },
+    { icon: Package, label: 'Items', path: '/inventory' },
     { icon: Tags, label: 'Categories', path: '/categories' },
     { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
     { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
