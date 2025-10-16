@@ -1,5 +1,4 @@
-
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   BarChart3, 
@@ -9,22 +8,76 @@ import {
   AlertTriangle, 
   FileText, 
   Bot, 
-  Settings 
+  Settings,
+  ClipboardList,
+  Clock,
+  CheckCircle 
 } from 'lucide-react';
+import { getRequests } from '../api';
 
 const Sidebar = ({ isOpen, onToggle }) => {
   const location = useLocation();
+  const [pendingCount, setPendingCount] = useState(0);
+  const [approvedCount, setApprovedCount] = useState(0);
+
+  useEffect(() => {
+    const loadCounts = async () => {
+      try {
+        const data = await getRequests();
+        const pending = data.filter(r => r.status === 'pending').length;
+        const approved = data.filter(r => r.status === 'approved').length;
+        setPendingCount(pending);
+        setApprovedCount(approved);
+      } catch (error) {
+        console.error('Error loading counts:', error);
+      }
+    };
+
+    loadCounts();
+
+    const interval = setInterval(loadCounts, 10000); // Refresh every 10 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   const menuItems = [
     { icon: BarChart3, label: 'Dashboard', path: '/' },
     { icon: Package, label: 'Items', path: '/inventory' },
     { icon: Tags, label: 'Categories', path: '/categories' },
-    { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
     { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
+    { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
+    { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
+    { icon: Clock, label: 'Pending Approvals', path: '/pending-approvals' },
+    { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
     { icon: FileText, label: 'Reports', path: '/reports' },
     { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
     { icon: Settings, label: 'Settings', path: '/settings' },
   ];
+
+  const renderBadge = (label: string) => {
+    let count = 0;
+    let isPending = false;
+    let isApproved = false;
+
+    if (label === 'Pending Approvals') {
+      count = pendingCount;
+      isPending = true;
+    } else if (label === 'Approved Forms') {
+      count = approvedCount;
+      isApproved = true;
+    }
+
+    if ((isPending || isApproved) && count > 0) {
+      const displayCount = count > 99 ? '99+' : count.toString();
+      const badgeColor = isPending ? 'bg-red-500' : 'bg-yellow-500'; // Red for pending, yellow for approved
+      return (
+        <span className={`${badgeColor} text-white text-xs rounded-full h-5 w-5 flex items-center justify-center ml-2 min-w-[20px]`}>
+          {displayCount}
+        </span>
+      );
+    }
+    return null;
+  };
 
   return (
     <>
@@ -44,9 +97,12 @@ const Sidebar = ({ isOpen, onToggle }) => {
       `}>
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center px-6 py-4 border-b border-gray-200">
-            <Package className="h-8 w-8 text-blue-600" />
-            <span className="ml-2 text-xl font-bold text-gray-900">Vobiss Store</span>
+          <div className="flex items-center px-6 py-6 border-b border-gray-200">
+            <img src="/vobiss-logo.png" alt="Vobiss Logo" className="h-12 w-12 mr-3 flex-shrink-0" />
+            <div className="flex flex-col">
+              <span className="text-xl font-bold text-gray-900">Vobiss</span>
+              <span className="text-sm text-gray-600">Inventory</span>
+            </div>
           </div>
 
           {/* Navigation */}
@@ -71,7 +127,8 @@ const Sidebar = ({ isOpen, onToggle }) => {
                   }}
                 >
                   <Icon className="h-5 w-5 mr-3" />
-                  {item.label}
+                  <span className="flex-1">{item.label}</span>
+                  {renderBadge(item.label)}
                 </Link>
               );
             })}

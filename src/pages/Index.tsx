@@ -1,6 +1,5 @@
-
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Dashboard from './Dashboard';
 import Inventory from './Inventory';
@@ -10,6 +9,10 @@ import LowStockAlerts from './LowStockAlerts';
 import Reports from './Reports';
 import AIAssistant from './AIAssistant';
 import Settings from './Settings';
+import RequestForms from './RequestForms';
+import PendingApprovals from './PendingApprovals';
+import ApprovedForms from './ApprovedForms';
+import RequestDetails from './RequestDetails';
 
 const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -32,6 +35,12 @@ const Index = () => {
               <Route path="/reports" element={<Reports />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/request-forms" element={<RequestForms />} />
+              <Route path="/request-forms/:id" element={<RequestDetails />} />
+              <Route path="/pending-approvals" element={<PendingApprovals />} />
+              <Route path="/pending-approvals/:id" element={<RequestDetails />} />
+              <Route path="/approved-forms" element={<ApprovedForms />} />
+              <Route path="/approved-forms/:id" element={<RequestDetails />} />
             </Routes>
           </main>
         </div>

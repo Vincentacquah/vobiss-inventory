@@ -1,21 +1,16 @@
+// server.js (or app.js)
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import {
-  getItems,
-  addItem,
-  updateItem,
-  deleteItem,
-  getCategories,
-  addCategory,
-  updateCategory,
-  deleteCategory,
-  getItemsOut,
-  issueItem,
-  getLowStockItems,
-  getDashboardStats,
-  createRequest,
-  getRequests,
+  getItems, addItem, updateItem, deleteItem,
+  getCategories, addCategory, updateCategory, deleteCategory,
+  getItemsOut, issueItem, getLowStockItems, getDashboardStats,
+  createRequest, getRequests, approveRequest, finalizeRequest, getRequestDetails,
+  updateRequest, rejectRequest
 } from './db.js';
 
 dotenv.config();
@@ -23,9 +18,39 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Ensure uploads directory exists
+const uploadsDir = './uploads';
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Multer configuration for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'receipt-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
+
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use('/uploads', express.static('uploads'));
 
 // Items Routes
 app.get('/api/items', async (req, res) => {
@@ -38,9 +63,14 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
-app.post('/api/items', async (req, res) => {
+app.post('/api/items', upload.single('receiptImage'), async (req, res) => {
   try {
-    const item = await addItem(req.body);
+    const itemData = req.body;
+    let receiptImages = [];
+    if (req.file) {
+      receiptImages = [`/uploads/${req.file.filename}`];
+    }
+    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) });
     res.status(201).json(item);
   } catch (error) {
     console.error('Error adding item:', error.stack);
@@ -48,9 +78,30 @@ app.post('/api/items', async (req, res) => {
   }
 });
 
-app.put('/api/items/:id', async (req, res) => {
+app.put('/api/items/:id', upload.single('receiptImage'), async (req, res) => {
   try {
-    const item = await updateItem(req.params.id, req.body);
+    const itemId = parseInt(req.params.id);
+    const currentItems = await getItems();
+    const currentItem = currentItems.find(item => item.id === itemId);
+    
+    if (!currentItem) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    const itemData = req.body;
+    let receiptImages = [];
+    try {
+      receiptImages = typeof currentItem.receipt_images === 'string' ? JSON.parse(currentItem.receipt_images) : currentItem.receipt_images || [];
+    } catch (e) {
+      receiptImages = [];
+    }
+
+    if (req.file) {
+      receiptImages.push(`/uploads/${req.file.filename}`);
+    }
+
+    const updatedItemData = { ...itemData, receipt_images: JSON.stringify(receiptImages) };
+    const item = await updateItem(itemId, updatedItemData);
     res.json(item);
   } catch (error) {
     console.error('Error updating item:', error.stack);
@@ -60,6 +111,25 @@ app.put('/api/items/:id', async (req, res) => {
 
 app.delete('/api/items/:id', async (req, res) => {
   try {
+    // Delete associated receipt images
+    const currentItems = await getItems();
+    const itemToDelete = currentItems.find(item => item.id === parseInt(req.params.id));
+    if (itemToDelete) {
+      let receiptImages = [];
+      try {
+        receiptImages = typeof itemToDelete.receipt_images === 'string' ? JSON.parse(itemToDelete.receipt_images) : itemToDelete.receipt_images || [];
+      } catch (e) {
+        receiptImages = [];
+      }
+      receiptImages.forEach(imgPath => {
+        try {
+          fs.unlinkSync(`.${imgPath}`);
+        } catch (unlinkError) {
+          console.warn('Could not delete receipt image:', unlinkError);
+        }
+      });
+    }
+    
     const result = await deleteItem(req.params.id);
     res.json(result);
   } catch (error) {
@@ -68,7 +138,8 @@ app.delete('/api/items/:id', async (req, res) => {
   }
 });
 
-// Categories Routes
+// ... (rest of routes remain the same)
+
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await getCategories();
@@ -121,7 +192,7 @@ app.get('/api/items-out', async (req, res) => {
 });
 
 app.post('/api/items-out', async (req, res) => {
-  console.log('Received issueItem request with data:', req.body); // Added logging
+  console.log('Received issueItem request with data:', req.body);
   try {
     const itemOut = await issueItem(req.body);
     res.status(201).json(itemOut);
@@ -171,6 +242,57 @@ app.get('/api/requests', async (req, res) => {
   } catch (error) {
     console.error('Error fetching requests:', error.stack);
     res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/requests/:id', async (req, res) => {
+  try {
+    const result = await updateRequest(req.params.id, req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Error updating request:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/reject', async (req, res) => {
+  try {
+    const result = await rejectRequest(req.params.id);
+    res.json(result);
+  } catch (error) {
+    console.error('Error rejecting request:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/approve', async (req, res) => {
+  try {
+    const result = await approveRequest(req.params.id, req.body);
+    res.json(result);
+  } catch (error) {
+    console.error('Error approving request:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/requests/:id/finalize', async (req, res) => {
+  try {
+    const { items, releasedBy } = req.body;
+    const result = await finalizeRequest(req.params.id, items, releasedBy);
+    res.json(result);
+  } catch (error) {
+    console.error('Error finalizing request:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/requests/:id', async (req, res) => {
+  try {
+    const request = await getRequestDetails(req.params.id);
+    res.json(request);
+  } catch (error) {
+    console.error('Error fetching request details:', error.stack);
+    res.status(error.message === 'Request not found' ? 404 : 500).json({ error: error.message });
   }
 });
 

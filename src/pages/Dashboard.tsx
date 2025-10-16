@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Tags, ArrowUpRight, AlertTriangle, TrendingUp, Users, BarChart3, Sparkles } from 'lucide-react';
-import { getItems, getCategories, getItemsOut, getDashboardStats } from '../api';
+import { Package, Tags, ArrowUpRight, AlertTriangle, TrendingUp, Users, BarChart3, Sparkles, FileText, CheckCircle } from 'lucide-react';
+import { getItems, getCategories, getItemsOut, getDashboardStats, getRequests } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from 'react-router-dom';
@@ -15,6 +15,8 @@ interface Stats {
   totalCategories: number;
   itemsOut: number;
   lowStockItems: number;
+  pendingRequests: number;
+  completedRequests: number;
 }
 
 /**
@@ -34,10 +36,11 @@ interface Item {
  */
 interface RecentActivity {
   id: string;
-  personName: string;
-  quantity: number;
-  itemName: string;
+  type: 'item_out' | 'request_created' | 'request_approved' | 'request_completed';
+  title: string;
+  description: string;
   dateTime: string;
+  icon: React.ElementType;
 }
 
 /**
@@ -53,6 +56,18 @@ interface ItemOut {
 }
 
 /**
+ * Interface for requests
+ */
+interface Request {
+  id: number;
+  created_by: string;
+  project_name: string;
+  status: 'pending' | 'approved' | 'completed' | 'rejected';
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Dashboard Component
  * Displays an overview of inventory system with key statistics, recent activity, stock overview chart, and quick actions
  */
@@ -63,6 +78,8 @@ const Dashboard = () => {
     totalCategories: 0,
     itemsOut: 0,
     lowStockItems: 0,
+    pendingRequests: 0,
+    completedRequests: 0,
   });
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [allItems, setAllItems] = useState<Item[]>([]);
@@ -83,40 +100,102 @@ const Dashboard = () => {
 
   /**
    * Loads all dashboard data from API
-   * Includes items, categories, items out, and recent activities
+   * Includes items, categories, items out, requests, and recent activities
    */
   const loadDashboardData = async () => {
     try {
       setLoading(true);
 
       // Fetch data from API
-      const [items, categories, itemsOut] = await Promise.all([getItems(), getCategories(), getItemsOut()]);
+      const [items, categories, itemsOut, requests] = await Promise.all([
+        getItems(), 
+        getCategories(), 
+        getItemsOut(), 
+        getRequests()
+      ]);
       const statsData = await getDashboardStats();
 
       // Calculate low stock items
       const lowStock = items.filter((item) => item.quantity <= (item.low_stock_threshold || 0));
       const totalStocks = items.reduce((sum, item) => sum + item.quantity, 0);
 
+      const completedRequests = requests.filter(r => r.status === 'completed').length;
+
       setStats({
         totalItems: statsData.totalItems || items.length,
         totalCategories: statsData.totalCategories || categories.length,
-        itemsOut: statsData.itemsOut || itemsOut.length,
+        itemsOut: statsData.itemsOut || itemsOut.length + completedRequests, // Combine direct issues and finalized requests
         lowStockItems: statsData.lowStockItems || lowStock.length,
+        pendingRequests: statsData.pendingRequests || requests.filter(r => r.status === 'pending').length,
+        completedRequests,
       });
       setAllItems(items);
 
-      // Get recent activities with item names
-      const recentActivitiesData = itemsOut
-        .slice(0, 5)
+      // Get recent activities from items out (direct issues)
+      const itemOutActivities: RecentActivity[] = itemsOut
+        .slice(0, 2)
         .sort((a, b) => new Date(b.date_time).getTime() - new Date(a.date_time).getTime())
         .map((activity) => ({
-          id: activity.id,
-          personName: activity.person_name || 'Unknown',
-          quantity: activity.quantity,
-          itemName: activity.item_name || 'Unknown Item',
+          id: `out-${activity.id}`,
+          type: 'item_out',
+          title: `${activity.person_name || 'Unknown'} issued items`,
+          description: `${activity.quantity} x ${activity.item_name || 'Unknown Item'}`,
           dateTime: activity.date_time,
+          icon: ArrowUpRight,
         }));
-      setRecentActivity(recentActivitiesData);
+
+      // Get recent request creations
+      const recentRequests = requests
+        .filter(r => new Date(r.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .slice(0, 2)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .map((req) => ({
+          id: `create-${req.id}`,
+          type: 'request_created',
+          title: `New request created`,
+          description: `By ${req.created_by} for project "${req.project_name}"`,
+          dateTime: req.created_at,
+          icon: FileText,
+        }));
+
+      // Get recent approved requests (using updated_at for approval time)
+      const approvedRequests = requests
+        .filter(r => r.status === 'approved' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .slice(0, 2)
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .map((req) => ({
+          id: `approve-${req.id}`,
+          type: 'request_approved',
+          title: `Request approved`,
+          description: `Project "${req.project_name}" by ${req.created_by}`,
+          dateTime: req.updated_at,
+          icon: CheckCircle,
+        }));
+
+      // Get recent completed requests (finalized issuances)
+      const completedRequestsActivity = requests
+        .filter(r => r.status === 'completed' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .slice(0, 2)
+        .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        .map((req) => ({
+          id: `complete-${req.id}`,
+          type: 'request_completed',
+          title: `Request finalized`,
+          description: `Project "${req.project_name}" issued by ${req.release_by || 'N/A'}`,
+          dateTime: req.updated_at,
+          icon: CheckCircle,
+        }));
+
+      // Combine and sort all recent activities (limit to 5 most recent)
+      const allRecentActivities = [
+        ...itemOutActivities,
+        ...recentRequests,
+        ...approvedRequests,
+        ...completedRequestsActivity,
+      ].sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime())
+       .slice(0, 5);
+
+      setRecentActivity(allRecentActivities);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
       toast({
@@ -270,7 +349,7 @@ const Dashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           icon={Package}
           title="Total Items"
@@ -291,7 +370,7 @@ const Dashboard = () => {
           title="Items Out"
           value={stats.itemsOut}
           color="from-purple-500 to-purple-600 bg-gradient-to-br"
-          description="Currently checked out"
+          description="Issued (direct + requests)"
           trend="+8% this week"
         />
         <StatCard
@@ -302,11 +381,18 @@ const Dashboard = () => {
           description="Needs replenishment"
         />
         <StatCard
-          icon={Package}
-          title="Total Stock"
-          value={allItems.reduce((sum, item) => sum + item.quantity, 0)}
-          color="from-yellow-500 to-yellow-600 bg-gradient-to-br"
-          description="Units in inventory"
+          icon={FileText}
+          title="Pending Requests"
+          value={stats.pendingRequests}
+          color="from-orange-500 to-orange-600 bg-gradient-to-br"
+          description="Awaiting approval"
+        />
+        <StatCard
+          icon={CheckCircle}
+          title="Completed Requests"
+          value={stats.completedRequests}
+          color="from-emerald-500 to-emerald-600 bg-gradient-to-br"
+          description="Finalized issuances"
         />
       </div>
 
@@ -338,26 +424,59 @@ const Dashboard = () => {
           </h2>
           <div className="space-y-3 max-h-80 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
             {recentActivity.length > 0 ? (
-              recentActivity.map((activity, index) => (
-                <div 
-                  key={activity.id} 
-                  className={`flex items-start p-4 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-300 ${
-                    index % 2 === 0 ? 'bg-gradient-to-r from-blue-50 to-purple-50' : 'bg-gradient-to-r from-indigo-50 to-pink-50'
-                  }`}
-                >
-                  <div className="p-2 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full mr-3 flex-shrink-0">
-                    <Users className="h-4 w-4 text-blue-600" />
+              recentActivity.map((activity) => {
+                const Icon = activity.icon;
+                let bgClass = '';
+                let iconBgClass = '';
+                let iconColor = '';
+                switch (activity.type) {
+                  case 'item_out':
+                    bgClass = 'bg-gradient-to-r from-blue-50 to-purple-50';
+                    iconBgClass = 'bg-gradient-to-br from-blue-100 to-purple-100';
+                    iconColor = 'text-blue-600';
+                    break;
+                  case 'request_created':
+                    bgClass = 'bg-gradient-to-r from-green-50 to-emerald-50';
+                    iconBgClass = 'bg-gradient-to-br from-green-100 to-emerald-100';
+                    iconColor = 'text-green-600';
+                    break;
+                  case 'request_approved':
+                    bgClass = 'bg-gradient-to-r from-indigo-50 to-blue-50';
+                    iconBgClass = 'bg-gradient-to-br from-indigo-100 to-blue-100';
+                    iconColor = 'text-indigo-600';
+                    break;
+                  case 'request_completed':
+                    bgClass = 'bg-gradient-to-r from-emerald-50 to-teal-50';
+                    iconBgClass = 'bg-gradient-to-br from-emerald-100 to-teal-100';
+                    iconColor = 'text-emerald-600';
+                    break;
+                  default:
+                    bgClass = 'bg-gradient-to-r from-gray-50 to-gray-100';
+                    iconBgClass = 'bg-gray-100';
+                    iconColor = 'text-gray-600';
+                }
+                return (
+                  <div 
+                    key={activity.id} 
+                    className={`flex items-start p-4 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-300 ${bgClass}`}
+                  >
+                    <div className={`${iconBgClass} p-2 rounded-full mr-3 flex-shrink-0`}>
+                      <Icon className={`h-4 w-4 ${iconColor}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">
+                        {activity.title}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {activity.description}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(activity.dateTime).toLocaleString()}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {activity.personName} issued {activity.quantity} x {activity.itemName}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {new Date(activity.dateTime).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="text-center py-12">
                 <Users className="h-12 w-12 text-gray-400 mx-auto mb-4 animate-bounce" />
