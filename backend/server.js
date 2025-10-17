@@ -1,22 +1,26 @@
-// server.js (or app.js)
+// server.js
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 import {
   getItems, addItem, updateItem, deleteItem,
   getCategories, addCategory, updateCategory, deleteCategory,
   getItemsOut, issueItem, getLowStockItems, getDashboardStats,
   createRequest, getRequests, approveRequest, finalizeRequest, getRequestDetails,
-  updateRequest, rejectRequest
+  updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs
 } from './db.js';
+import pool from './db.js';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
 
 // Ensure uploads directory exists
 const uploadsDir = './uploads';
@@ -51,6 +55,80 @@ const upload = multer({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
+
+// Seed default user
+async function seedDefaultUser() {
+  try {
+    const defaultUsername = 'admin';
+    const defaultPassword = await bcrypt.hash('admin123', 10);
+    const defaultRole = 'superadmin';
+    const existing = await getUserByUsername(defaultUsername);
+    if (!existing) {
+      await pool.query(
+        'INSERT INTO users (username, password, role) VALUES ($1, $2, $3)',
+        [defaultUsername, defaultPassword, defaultRole]
+      );
+      console.log('Default user created: admin / admin123');
+    } else {
+      console.log('Default user already exists');
+    }
+  } catch (error) {
+    console.error('Error seeding default user:', error);
+  }
+}
+
+await seedDefaultUser();
+
+// Auth Routes
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const user = await getUserByUsername(username);
+    if (!user || !await bcrypt.compare(password, user.password)) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+    // Log audit
+    const ip = req.ip || req.connection.remoteAddress;
+    const details = { userAgent: req.get('User-Agent') };
+    await insertAuditLog(user.id, 'login', ip, details);
+    res.json({ token, user: { username: user.username, role: user.role } });
+  } catch (error) {
+    console.error('Error in login:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/logout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const ip = req.ip || req.connection.remoteAddress;
+        const details = { userAgent: req.get('User-Agent') };
+        await insertAuditLog(decoded.id, 'logout', ip, details);
+      } catch (verifyError) {
+        console.warn('Invalid token on logout:', verifyError);
+      }
+    }
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error('Error in logout:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/audit-logs', async (req, res) => {
+  try {
+    const logs = await getAuditLogs();
+    res.json(logs);
+  } catch (error) {
+    console.error('Error fetching audit logs:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Items Routes
 app.get('/api/items', async (req, res) => {
@@ -137,8 +215,6 @@ app.delete('/api/items/:id', async (req, res) => {
     res.status(error.message === 'Item not found' ? 404 : 500).json({ error: error.message });
   }
 });
-
-// ... (rest of routes remain the same)
 
 app.get('/api/categories', async (req, res) => {
   try {

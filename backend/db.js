@@ -1,7 +1,9 @@
+// db.js
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import bcrypt from 'bcrypt';
 
 // Load environment variables
 config({ path: './.env' });
@@ -23,6 +25,45 @@ const pool = new Pool({
   user: process.env.PG_USER,
   password: String(process.env.PG_PASSWORD || ''),
 });
+
+// Users
+export async function getUserByUsername(username) {
+  try {
+    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error fetching user:', error.stack);
+    throw error;
+  }
+}
+
+// Audit Logs
+export async function insertAuditLog(userId, action, ip, details = null) {
+  try {
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
+      [userId, action, ip, details ? JSON.stringify(details) : null]
+    );
+  } catch (error) {
+    console.error('Error inserting audit log:', error.stack);
+    throw error;
+  }
+}
+
+export async function getAuditLogs() {
+  try {
+    const result = await pool.query(`
+      SELECT al.*, u.username 
+      FROM audit_logs al 
+      LEFT JOIN users u ON al.user_id = u.id 
+      ORDER BY al.timestamp DESC
+    `);
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching audit logs:', error.stack);
+    throw error;
+  }
+}
 
 // Categories
 export async function getCategories() {

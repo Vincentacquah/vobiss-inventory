@@ -1,3 +1,4 @@
+// src/pages/Index.tsx
 import React, { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
@@ -13,6 +14,7 @@ import RequestForms from './RequestForms';
 import PendingApprovals from './PendingApprovals';
 import ApprovedForms from './ApprovedForms';
 import RequestDetails from './RequestDetails';
+import AuditLogs from './AuditLogs';
 
 const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -41,6 +43,7 @@ const Index = () => {
               <Route path="/pending-approvals/:id" element={<RequestDetails />} />
               <Route path="/approved-forms" element={<ApprovedForms />} />
               <Route path="/approved-forms/:id" element={<RequestDetails />} />
+              <Route path="/audit-logs" element={<AuditLogs />} />
             </Routes>
           </main>
         </div>

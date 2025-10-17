@@ -11,14 +11,19 @@ import {
   Settings,
   ClipboardList,
   Clock,
-  CheckCircle 
+  CheckCircle,
+  LogOut,
+  FileText as AuditIcon
 } from 'lucide-react';
 import { getRequests } from '../api';
+import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isOpen, onToggle }) => {
   const location = useLocation();
+  const { user, logout } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
   const [approvedCount, setApprovedCount] = useState(0);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     const loadCounts = async () => {
@@ -40,6 +45,26 @@ const Sidebar = ({ isOpen, onToggle }) => {
     return () => clearInterval(interval);
   }, []);
 
+  // Prevent body scroll on mobile when sidebar is open
+  useEffect(() => {
+    if (isOpen && window.innerWidth < 1024) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    await new Promise(resolve => setTimeout(resolve, 1200)); // 1.2 second delay
+    logout();
+    setIsLoggingOut(false);
+  };
+
   const menuItems = [
     { icon: BarChart3, label: 'Dashboard', path: '/' },
     { icon: Package, label: 'Items', path: '/inventory' },
@@ -49,6 +74,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
     { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
     { icon: Clock, label: 'Pending Approvals', path: '/pending-approvals' },
     { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
+    { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
     { icon: FileText, label: 'Reports', path: '/reports' },
     { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
     { icon: Settings, label: 'Settings', path: '/settings' },
@@ -105,8 +131,16 @@ const Sidebar = ({ isOpen, onToggle }) => {
             </div>
           </div>
 
+          {/* User Info */}
+          {user && (
+            <div className="px-6 py-3 border-b border-gray-200 bg-gray-50">
+              <div className="text-sm font-semibold text-gray-900">{user.username}</div>
+              <div className="text-xs text-gray-500 capitalize">{user.role}</div>
+            </div>
+          )}
+
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-2">
+          <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -134,8 +168,29 @@ const Sidebar = ({ isOpen, onToggle }) => {
             })}
           </nav>
 
+          {/* Logout */}
+          {user && (
+            <div className="px-4 py-3 border-t border-gray-200">
+              <button
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className={`
+                  w-full flex items-center px-3 py-2 text-sm font-medium text-red-600 rounded-lg transition-colors
+                  ${isLoggingOut ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-50'}
+                `}
+              >
+                {isLoggingOut ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-red-600 mr-2"></div>
+                ) : (
+                  <LogOut className="h-4 w-4 mr-2" />
+                )}
+                {isLoggingOut ? 'Logging out...' : 'Logout'}
+              </button>
+            </div>
+          )}
+
           {/* Footer */}
-          <div className="px-6 py-4 border-t border-gray-200">
+          <div className="px-6 py-4 border-t border-gray-200 mt-auto">
             <div className="text-xs text-gray-500">
               Version 1.0.0
             </div>
