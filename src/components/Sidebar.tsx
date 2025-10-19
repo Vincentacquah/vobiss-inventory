@@ -13,9 +13,10 @@ import {
   Clock,
   CheckCircle,
   LogOut,
-  FileText as AuditIcon
+  FileText as AuditIcon,
+  Users
 } from 'lucide-react';
-import { getRequests } from '../api';
+import { getRequests, getLowStockItems } from '../api';
 import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isOpen, onToggle }) => {
@@ -23,16 +24,21 @@ const Sidebar = ({ isOpen, onToggle }) => {
   const { user, logout } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
   const [approvedCount, setApprovedCount] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     const loadCounts = async () => {
       try {
-        const data = await getRequests();
-        const pending = data.filter(r => r.status === 'pending').length;
-        const approved = data.filter(r => r.status === 'approved').length;
+        const [requestsData, lowStockData] = await Promise.all([
+          getRequests(),
+          getLowStockItems()
+        ]);
+        const pending = requestsData.filter(r => r.status === 'pending').length;
+        const approved = requestsData.filter(r => r.status === 'approved').length;
         setPendingCount(pending);
         setApprovedCount(approved);
+        setLowStockCount(lowStockData.length);
       } catch (error) {
         console.error('Error loading counts:', error);
       }
@@ -71,6 +77,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
     { icon: Tags, label: 'Categories', path: '/categories' },
     { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
     { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
+    ...(user?.role === 'superadmin' ? [{ icon: Users, label: 'Supervisors', path: '/supervisors' }] : []),
     { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
     { icon: Clock, label: 'Pending Approvals', path: '/pending-approvals' },
     { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
@@ -84,6 +91,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
     let count = 0;
     let isPending = false;
     let isApproved = false;
+    let isLowStock = false;
 
     if (label === 'Pending Approvals') {
       count = pendingCount;
@@ -91,11 +99,17 @@ const Sidebar = ({ isOpen, onToggle }) => {
     } else if (label === 'Approved Forms') {
       count = approvedCount;
       isApproved = true;
+    } else if (label === 'Low Stock Alerts') {
+      count = lowStockCount;
+      isLowStock = true;
     }
 
-    if ((isPending || isApproved) && count > 0) {
+    if ((isPending || isApproved || isLowStock) && count > 0) {
       const displayCount = count > 99 ? '99+' : count.toString();
-      const badgeColor = isPending ? 'bg-red-500' : 'bg-yellow-500'; // Red for pending, yellow for approved
+      let badgeColor = '';
+      if (isPending) badgeColor = 'bg-red-500';
+      else if (isApproved) badgeColor = 'bg-yellow-500';
+      else if (isLowStock) badgeColor = 'bg-orange-500';
       return (
         <span className={`${badgeColor} text-white text-xs rounded-full h-5 w-5 flex items-center justify-center ml-2 min-w-[20px]`}>
           {displayCount}

@@ -1,4 +1,3 @@
-// db.js
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -26,6 +25,196 @@ const pool = new Pool({
   password: String(process.env.PG_PASSWORD || ''),
 });
 
+// Initialize database tables
+export async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username VARCHAR(255) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        role VARCHAR(50) DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS supervisors (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS settings (
+        id SERIAL PRIMARY KEY,
+        key_name VARCHAR(255) UNIQUE NOT NULL,
+        value TEXT NOT NULL,
+        description TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        action VARCHAR(255) NOT NULL,
+        ip_address VARCHAR(45),
+        details JSONB,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendors (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        contact_info TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        category_id INTEGER REFERENCES categories(id),
+        vendor_id INTEGER REFERENCES vendors(id),
+        quantity INTEGER NOT NULL DEFAULT 0,
+        low_stock_threshold INTEGER DEFAULT 5,
+        vendor_name VARCHAR(255),
+        unit_price DECIMAL(10,2),
+        receipt_images JSONB DEFAULT '[]',
+        update_reasons TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP
+      );
+    `);
+
+    // Add vendor_id column to items if it doesn't exist (for schema migrations)
+    try {
+      await pool.query(`
+        ALTER TABLE items ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id);
+      `);
+    } catch (alterError) {
+      // Ignore if column already exists or other non-critical errors
+      if (!alterError.message.includes('already exists')) {
+        console.warn('Warning during schema migration:', alterError.message);
+      }
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS items_out (
+        id SERIAL PRIMARY KEY,
+        person_name VARCHAR(255) NOT NULL,
+        item_id INTEGER REFERENCES items(id),
+        quantity INTEGER NOT NULL,
+        date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS requests (
+        id SERIAL PRIMARY KEY,
+        created_by VARCHAR(255) NOT NULL,
+        team_leader_name VARCHAR(255),
+        team_leader_phone VARCHAR(50),
+        project_name VARCHAR(255),
+        isp_name VARCHAR(255),
+        location TEXT,
+        deployment_type VARCHAR(100),
+        release_by VARCHAR(255),
+        received_by VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS request_items (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+        item_id INTEGER REFERENCES items(id),
+        quantity_requested INTEGER NOT NULL,
+        quantity_received INTEGER,
+        quantity_returned INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS approvals (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+        approver_name VARCHAR(255) NOT NULL,
+        signature TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    // Seed default email settings if not exist
+    const defaults = [
+      { key: 'from_name', value: 'Inventory System', desc: 'Sender name for low stock alert emails' },
+      { key: 'from_email', value: 'helloriceug@gmail.com', desc: 'Sender email for low stock alert emails' }
+    ];
+    for (const def of defaults) {
+      const exists = await pool.query('SELECT id FROM settings WHERE key_name = $1', [def.key]);
+      if (exists.rowCount === 0) {
+        await pool.query(
+          'INSERT INTO settings (key_name, value, description) VALUES ($1, $2, $3)',
+          [def.key, def.value, def.desc]
+        );
+      }
+    }
+    console.log('Database tables initialized');
+  } catch (error) {
+    console.error('Error initializing database:', error.stack);
+    throw error;
+  }
+}
+
+// Settings
+export async function getSettings() {
+  try {
+    const result = await pool.query('SELECT * FROM settings ORDER BY key_name ASC');
+    const settingsMap = {};
+    result.rows.forEach(row => {
+      settingsMap[row.key_name] = row.value;
+    });
+    return { ...settingsMap, all: result.rows };
+  } catch (error) {
+    console.error('Error fetching settings:', error.stack);
+    throw error;
+  }
+}
+
+export async function updateSetting(keyName, value) {
+  try {
+    const result = await pool.query(
+      'UPDATE settings SET value = $1, updated_at = CURRENT_TIMESTAMP WHERE key_name = $2 RETURNING *',
+      [value, keyName]
+    );
+    if (result.rowCount === 0) {
+      // Insert if not exists
+      await pool.query(
+        'INSERT INTO settings (key_name, value, description) VALUES ($1, $2, $3)',
+        [keyName, value, '']
+      );
+    }
+    return { key: keyName, value };
+  } catch (error) {
+    console.error('Error updating setting:', error.stack);
+    throw error;
+  }
+}
+
 // Users
 export async function getUserByUsername(username) {
   try {
@@ -33,6 +222,69 @@ export async function getUserByUsername(username) {
     return result.rows[0];
   } catch (error) {
     console.error('Error fetching user:', error.stack);
+    throw error;
+  }
+}
+
+// Supervisors
+export async function getSupervisors() {
+  try {
+    const result = await pool.query('SELECT * FROM supervisors ORDER BY name ASC');
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching supervisors:', error.stack);
+    throw error;
+  }
+}
+
+export async function addSupervisor(supervisorData) {
+  try {
+    const { name, email } = supervisorData;
+    if (!name || !email) {
+      throw new Error('Name and email are required');
+    }
+    const result = await pool.query(
+      'INSERT INTO supervisors (name, email, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING *',
+      [name.trim(), email.trim().toLowerCase()]
+    );
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error adding supervisor:', error.stack);
+    if (error.code === '23505') { // Unique violation
+      throw new Error('Email already exists');
+    }
+    throw error;
+  }
+}
+
+export async function updateSupervisor(supervisorId, supervisorData) {
+  try {
+    const { name, email } = supervisorData;
+    if (!name || !email) {
+      throw new Error('Name and email are required');
+    }
+    const result = await pool.query(
+      'UPDATE supervisors SET name = $1, email = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
+      [name.trim(), email.trim().toLowerCase(), supervisorId]
+    );
+    if (result.rowCount === 0) throw new Error('Supervisor not found');
+    return result.rows[0];
+  } catch (error) {
+    console.error('Error updating supervisor:', error.stack);
+    if (error.code === '23505') { // Unique violation
+      throw new Error('Email already exists');
+    }
+    throw error;
+  }
+}
+
+export async function deleteSupervisor(supervisorId) {
+  try {
+    const result = await pool.query('DELETE FROM supervisors WHERE id = $1 RETURNING *', [supervisorId]);
+    if (result.rowCount === 0) throw new Error('Supervisor not found');
+    return { message: 'Supervisor deleted' };
+  } catch (error) {
+    console.error('Error deleting supervisor:', error.stack);
     throw error;
   }
 }
@@ -128,9 +380,10 @@ export async function deleteCategory(categoryId) {
 export async function getItems() {
   try {
     const result = await pool.query(`
-      SELECT i.*, c.name AS category_name
+      SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name
       FROM items i
       LEFT JOIN categories c ON i.category_id = c.id
+      LEFT JOIN vendors v ON i.vendor_id = v.id
       ORDER BY i.created_at DESC
     `);
     return result.rows;
@@ -142,7 +395,7 @@ export async function getItems() {
 
 export async function addItem(itemData) {
   try {
-    const { name, description, category_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images } = itemData;
+    const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, receipt_images } = itemData;
     
     const parsedQuantity = parseInt(quantity, 10);
     let parsedLowStockThreshold = low_stock_threshold ? parseInt(low_stock_threshold, 10) : 5;
@@ -151,6 +404,7 @@ export async function addItem(itemData) {
     }
     const parsedUnitPrice = unit_price ? parseFloat(unit_price) : null;
     const parsedCategoryId = category_id ? parseInt(category_id, 10) : null;
+    const parsedVendorId = vendor_id ? parseInt(vendor_id, 10) : null;
 
     if (isNaN(parsedQuantity) || parsedQuantity < 0) {
       throw new Error('Quantity is required and must be non-negative');
@@ -160,9 +414,10 @@ export async function addItem(itemData) {
     }
 
     const result = await pool.query(
-      'INSERT INTO items (name, description, category_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, NULL) RETURNING *',
-      [name, description || null, parsedCategoryId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
+      'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL) RETURNING *',
+      [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
     );
+
     return result.rows[0];
   } catch (error) {
     console.error('Error adding item:', error.stack);
@@ -170,22 +425,30 @@ export async function addItem(itemData) {
   }
 }
 
+// Items update with low stock check
 export async function updateItem(itemId, itemData) {
   const client = await pool.connect();
+  let prevQuantity = 0;
+  let threshold = 5;
   try {
     await client.query('BEGIN');
     
-    const { name, description, category_id, quantity, low_stock_threshold, vendor_name, unit_price, update_reason, receipt_images: providedReceiptImages } = itemData;
+    // Fetch previous quantity and threshold
+    const currentResult = await client.query('SELECT quantity, low_stock_threshold FROM items WHERE id = $1', [itemId]);
+    if (currentResult.rowCount === 0) throw new Error('Item not found');
+    prevQuantity = parseInt(currentResult.rows[0].quantity, 10);
+    threshold = currentResult.rows[0].low_stock_threshold || 5;
+
+    const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, update_reason, receipt_images: providedReceiptImages } = itemData;
     
     if (!update_reason || !update_reason.trim()) {
       throw new Error('Update reason is required');
     }
 
     // Get current data for update_reasons and receipt_images
-    const currentResult = await client.query('SELECT update_reasons, receipt_images FROM items WHERE id = $1', [itemId]);
-    if (currentResult.rowCount === 0) throw new Error('Item not found');
-    let currentReasons = currentResult.rows[0].update_reasons || '';
-    let currentReceiptImages = currentResult.rows[0].receipt_images ? JSON.parse(currentResult.rows[0].receipt_images) : [];
+    const itemCurrentResult = await client.query('SELECT update_reasons, receipt_images FROM items WHERE id = $1', [itemId]);
+    let currentReasons = itemCurrentResult.rows[0].update_reasons || '';
+    let currentReceiptImages = itemCurrentResult.rows[0].receipt_images ? JSON.parse(itemCurrentResult.rows[0].receipt_images) : [];
     const timestamp = new Date().toLocaleString();
     const newReasonEntry = `${update_reason} at ${timestamp}`;
     const newReasons = currentReasons ? `${currentReasons} | ${newReasonEntry}` : newReasonEntry;
@@ -220,6 +483,7 @@ export async function updateItem(itemId, itemData) {
     let parsedLowStockThreshold = low_stock_threshold ? parseInt(low_stock_threshold, 10) : null;
     const parsedUnitPrice = unit_price !== undefined ? (unit_price ? parseFloat(unit_price) : null) : null;
     const parsedCategoryId = category_id ? parseInt(category_id, 10) : null;
+    const parsedVendorId = vendor_id ? parseInt(vendor_id, 10) : null;
 
     if (isNaN(parsedQuantity) || parsedQuantity < 0) {
       throw new Error('Quantity must be non-negative');
@@ -232,12 +496,24 @@ export async function updateItem(itemId, itemData) {
     }
 
     const result = await client.query(
-      'UPDATE items SET name = $1, description = $2, category_id = $3, quantity = $4, low_stock_threshold = COALESCE($5, low_stock_threshold), vendor_name = $6, unit_price = $7, receipt_images = $8, update_reasons = $9, updated_at = CURRENT_TIMESTAMP WHERE id = $10 RETURNING *',
-      [name, description || null, parsedCategoryId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, JSON.stringify(newReceiptImagesArray), newReasons, itemId]
+      'UPDATE items SET name = $1, description = $2, category_id = $3, vendor_id = $4, quantity = $5, low_stock_threshold = COALESCE($6, low_stock_threshold), vendor_name = $7, unit_price = $8, receipt_images = $9, update_reasons = $10, updated_at = CURRENT_TIMESTAMP WHERE id = $11 RETURNING *',
+      [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, JSON.stringify(newReceiptImagesArray), newReasons, itemId]
     );
     if (result.rowCount === 0) throw new Error('Item not found');
+
     await client.query('COMMIT');
-    return result.rows[0];
+
+    const updatedItem = result.rows[0];
+    // Return updated item with joins for richer data
+    const fullItem = await client.query(`
+      SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name
+      FROM items i
+      LEFT JOIN categories c ON i.category_id = c.id
+      LEFT JOIN vendors v ON i.vendor_id = v.id
+      WHERE i.id = $1
+    `, [itemId]);
+    return fullItem.rows[0];
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error updating item:', error.stack);
@@ -299,32 +575,48 @@ export async function getItemsOut() {
 
 export async function issueItem(issueData) {
   const client = await pool.connect();
+  let prevQuantity = 0;
+  let threshold = 5;
+  let itemDetails = null;
   try {
     await client.query('BEGIN');
     console.log('Issuing item with data:', issueData);
-    const { personName, itemId, quantity } = issueData;
-    if (!personName || !itemId || !quantity) {
+    const { personName, itemId, quantity: issueQuantity } = issueData;
+    if (!personName || !itemId || !issueQuantity) {
       throw new Error('Missing required fields: personName, itemId, and quantity are required');
     }
+    const parsedIssueQuantity = parseInt(issueQuantity, 10);
+    if (parsedIssueQuantity <= 0) {
+      throw new Error('Quantity must be positive');
+    }
     const itemCheck = await client.query(
-      'SELECT quantity FROM items WHERE id = $1 FOR UPDATE',
+      'SELECT quantity, low_stock_threshold FROM items WHERE id = $1 FOR UPDATE',
       [itemId]
     );
     if (itemCheck.rowCount === 0) throw new Error('Item not found');
-    const availableQuantity = parseInt(itemCheck.rows[0].quantity, 10);
-    if (quantity > availableQuantity || quantity <= 0) {
-      throw new Error(`Insufficient stock. Only ${availableQuantity} units available. Requested: ${quantity}`);
+    prevQuantity = parseInt(itemCheck.rows[0].quantity, 10);
+    threshold = itemCheck.rows[0].low_stock_threshold || 5;
+    const availableQuantity = prevQuantity;
+    if (parsedIssueQuantity > availableQuantity) {
+      throw new Error(`Insufficient stock. Only ${availableQuantity} units available. Requested: ${parsedIssueQuantity}`);
     }
     const result = await client.query(
       'INSERT INTO items_out (person_name, item_id, quantity, date_time) VALUES ($1, $2, $3, CURRENT_TIMESTAMP) RETURNING *',
-      [personName, itemId, quantity]
+      [personName, itemId, parsedIssueQuantity]
     );
     await client.query(
       'UPDATE items SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [quantity, itemId]
+      [parsedIssueQuantity, itemId]
     );
+
+    // Fetch updated item details for alert
+    const updatedItemResult = await client.query('SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN vendors v ON i.vendor_id = v.id WHERE i.id = $1', [itemId]);
+    itemDetails = updatedItemResult.rows[0];
+
     await client.query('COMMIT');
-    return result.rows[0];
+
+    return { ...result.rows[0], item: itemDetails };
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error in issueItem transaction:', error.stack);
@@ -338,10 +630,11 @@ export async function issueItem(issueData) {
 export async function getLowStockItems() {
   try {
     const result = await pool.query(`
-      SELECT i.*, c.name AS category_name
+      SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name
       FROM items i
       LEFT JOIN categories c ON i.category_id = c.id
-      WHERE i.quantity <= COALESCE(i.low_stock_threshold, 0)
+      LEFT JOIN vendors v ON i.vendor_id = v.id
+      WHERE i.quantity <= COALESCE(i.low_stock_threshold, 5)
       ORDER BY i.created_at DESC
     `);
     return result.rows;
@@ -357,7 +650,7 @@ export async function getDashboardStats() {
       pool.query('SELECT COUNT(*) AS count FROM items'),
       pool.query('SELECT COUNT(*) AS count FROM categories'),
       pool.query('SELECT COUNT(*) AS count FROM items_out'),
-      pool.query('SELECT COUNT(*) AS count FROM items WHERE quantity <= COALESCE(low_stock_threshold, 0)'),
+      pool.query('SELECT COUNT(*) AS count FROM items WHERE quantity <= COALESCE(low_stock_threshold, 5)'),
       pool.query('SELECT COUNT(*) AS count FROM requests WHERE status = $1', ['pending']),
     ]);
     return {
@@ -455,9 +748,9 @@ export async function rejectRequest(requestId) {
   try {
     const result = await pool.query(
       'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status = $3 RETURNING *',
-      ['rejected', requestId, 'approved']
+      ['rejected', requestId, 'pending']
     );
-    if (result.rowCount === 0) throw new Error('Request not found or not approved');
+    if (result.rowCount === 0) throw new Error('Request not found or not pending');
     return { message: 'Request rejected' };
   } catch (error) {
     console.error('Error rejecting request:', error.stack);

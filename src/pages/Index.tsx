@@ -9,7 +9,8 @@ import ItemsOut from './ItemsOut';
 import LowStockAlerts from './LowStockAlerts';
 import Reports from './Reports';
 import AIAssistant from './AIAssistant';
-import Settings from './Settings';
+import SettingsPage from './SettingsPage';
+import SupervisorsPage from './SupervisorsPage';
 import RequestForms from './RequestForms';
 import PendingApprovals from './PendingApprovals';
 import ApprovedForms from './ApprovedForms';
@@ -36,7 +37,8 @@ const Index = () => {
               <Route path="/low-stock" element={<LowStockAlerts />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/ai-assistant" element={<AIAssistant />} />
-              <Route path="/settings" element={<Settings />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/supervisors" element={<SupervisorsPage />} />
               <Route path="/request-forms" element={<RequestForms />} />
               <Route path="/request-forms/:id" element={<RequestDetails />} />
               <Route path="/pending-approvals" element={<PendingApprovals />} />

@@ -12,9 +12,12 @@ import {
   getCategories, addCategory, updateCategory, deleteCategory,
   getItemsOut, issueItem, getLowStockItems, getDashboardStats,
   createRequest, getRequests, approveRequest, finalizeRequest, getRequestDetails,
-  updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs
+  updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs,
+  getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
+  initDB, getSettings, updateSetting
 } from './db.js';
 import pool from './db.js';
+import { sendLowStockAlert } from './emailService.js';
 
 dotenv.config();
 
@@ -56,9 +59,10 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
 
-// Seed default user
+// Seed default user and init DB
 async function seedDefaultUser() {
   try {
+    await initDB();
     const defaultUsername = 'admin';
     const defaultPassword = await bcrypt.hash('admin123', 10);
     const defaultRole = 'superadmin';
@@ -130,6 +134,87 @@ app.get('/api/audit-logs', async (req, res) => {
   }
 });
 
+// Settings Routes
+app.get('/api/settings', async (req, res) => {
+  try {
+    const settings = await getSettings();
+    res.json(settings);
+  } catch (error) {
+    console.error('Error fetching settings:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/settings/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    const updated = await updateSetting(key, value);
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating setting:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Supervisors Routes
+app.get('/api/supervisors', async (req, res) => {
+  try {
+    const supervisors = await getSupervisors();
+    res.json(supervisors);
+  } catch (error) {
+    console.error('Error fetching supervisors:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/supervisors', async (req, res) => {
+  try {
+    const supervisor = await addSupervisor(req.body);
+    res.status(201).json(supervisor);
+  } catch (error) {
+    console.error('Error adding supervisor:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/supervisors/:id', async (req, res) => {
+  try {
+    const supervisorId = parseInt(req.params.id);
+    const supervisor = await updateSupervisor(supervisorId, req.body);
+    res.json(supervisor);
+  } catch (error) {
+    console.error('Error updating supervisor:', error.stack);
+    res.status(error.message === 'Supervisor not found' ? 404 : 400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/supervisors/:id', async (req, res) => {
+  try {
+    const result = await deleteSupervisor(parseInt(req.params.id));
+    res.json(result);
+  } catch (error) {
+    console.error('Error deleting supervisor:', error.stack);
+    res.status(error.message === 'Supervisor not found' ? 404 : 500).json({ error: error.message });
+  }
+});
+
+// Dedicated route for manually triggering low stock alerts
+app.post('/api/send-low-stock-alert', async (req, res) => {
+  try {
+    // Optional: Accept a body param like { force: true } to override checks, but default to normal behavior
+    const { force } = req.body;
+    if (force) {
+      console.log('Force-triggered low stock alert');
+    }
+    await sendLowStockAlert();
+    res.json({ message: 'Low stock alert sent successfully (or no items to alert about)' });
+  } catch (error) {
+    console.error('Error in manual low stock alert trigger:', error);
+    res.status(500).json({ error: 'Failed to send alert: ' + error.message });
+  }
+});
+
 // Items Routes
 app.get('/api/items', async (req, res) => {
   try {
@@ -149,6 +234,15 @@ app.post('/api/items', upload.single('receiptImage'), async (req, res) => {
       receiptImages = [`/uploads/${req.file.filename}`];
     }
     const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) });
+    const parsedQuantity = parseInt(itemData.quantity, 10);
+    const threshold = item.low_stock_threshold || 5;
+    // Only trigger alert if the newly added item is low stock
+    if (parsedQuantity <= threshold) {
+      console.log('New item added is low stock, triggering alert (non-blocking)');
+      sendLowStockAlert(item).catch(err => console.error('Alert failed after item add:', err));
+    } else {
+      console.log('New item added is not low stock, skipping alert');
+    }
     res.status(201).json(item);
   } catch (error) {
     console.error('Error adding item:', error.stack);
@@ -180,6 +274,17 @@ app.put('/api/items/:id', upload.single('receiptImage'), async (req, res) => {
 
     const updatedItemData = { ...itemData, receipt_images: JSON.stringify(receiptImages) };
     const item = await updateItem(itemId, updatedItemData);
+
+    // Check if quantity decreased and now <= threshold (newly low or lower)
+    const oldQuantity = parseInt(currentItem.quantity, 10);
+    const newQuantity = parseInt(itemData.quantity, 10);
+    const threshold = item.low_stock_threshold || 5;
+    if (newQuantity < oldQuantity && newQuantity <= threshold) {
+      console.log('Item updated to low stock, triggering alert (non-blocking)');
+      sendLowStockAlert(item).catch(err => console.error('Alert failed after item update:', err));
+    } else {
+      console.log('Item updated but not newly low stock, skipping alert');
+    }
     res.json(item);
   } catch (error) {
     console.error('Error updating item:', error.stack);
@@ -216,6 +321,7 @@ app.delete('/api/items/:id', async (req, res) => {
   }
 });
 
+// Categories Routes
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await getCategories();
@@ -271,6 +377,9 @@ app.post('/api/items-out', async (req, res) => {
   console.log('Received issueItem request with data:', req.body);
   try {
     const itemOut = await issueItem(req.body);
+    // Always trigger after issuing (decreases stock)
+    console.log('Item issued, triggering low stock alert (non-blocking)');
+    sendLowStockAlert().catch(err => console.error('Alert failed after item issue:', err));
     res.status(201).json(itemOut);
   } catch (error) {
     console.error('Error issuing item:', error.stack);

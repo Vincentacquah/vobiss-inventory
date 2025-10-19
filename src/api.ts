@@ -94,6 +94,13 @@ interface AuditLog {
   timestamp: string;
 }
 
+interface Supervisor {
+  id: number;
+  name: string;
+  email: string;
+  created_at: string;
+}
+
 // Auth
 export const loginUser = async (username: string, password: string): Promise<{ token: string; user: { username: string; role: string } }> => {
   try {
@@ -130,6 +137,82 @@ export const logoutUser = async (): Promise<void> => {
   } catch (error) {
     console.error('Error logging out:', error);
     // Don't throw; logout should still clear local state
+  }
+};
+
+// Supervisors
+export const getSupervisors = async (): Promise<Supervisor[]> => {
+  try {
+    const response = await fetch(`${API_URL}/supervisors`, {
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error('Failed to fetch supervisors');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching supervisors:', error);
+    return [];
+  }
+};
+
+export const addSupervisor = async (supervisorData: { name: string; email: string }): Promise<Supervisor> => {
+  try {
+    const response = await fetch(`${API_URL}/supervisors`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(supervisorData),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to add supervisor');
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error adding supervisor:', error);
+    throw error;
+  }
+};
+
+export const updateSupervisor = async (supervisorId: number, supervisorData: { name: string; email: string }): Promise<Supervisor> => {
+  try {
+    const response = await fetch(`${API_URL}/supervisors/${supervisorId}`, {
+      method: 'PUT',
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(supervisorData),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to update supervisor');
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating supervisor:', error);
+    throw error;
+  }
+};
+
+export const deleteSupervisor = async (supervisorId: number): Promise<boolean> => {
+  try {
+    const response = await fetch(`${API_URL}/supervisors/${supervisorId}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error('Failed to delete supervisor');
+    return true;
+  } catch (error) {
+    console.error('Error deleting supervisor:', error);
+    throw error;
   }
 };
 
@@ -538,5 +621,51 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
   } catch (error) {
     console.error('Error fetching audit logs:', error);
     return [];
+  }
+};
+
+// api.ts (add these to the existing API file)
+interface Setting {
+  key_name: string;
+  value: string;
+  description?: string;
+  updated_at: string;
+}
+
+// Settings
+export const getSettings = async (): Promise<{ [key: string]: string; all: Setting[] }> => {
+  try {
+    const response = await fetch(`${API_URL}/settings`, {
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error('Failed to fetch settings');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    return { from_name: 'Inventory System', from_email: 'noreply@inventory.com', all: [] };
+  }
+};
+
+export const updateSetting = async (key: string, value: string): Promise<{ key: string; value: string }> => {
+  try {
+    const response = await fetch(`${API_URL}/settings/${key}`, {
+      method: 'POST',
+      headers: {
+        ...getAuthHeader(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ value }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Failed to update setting');
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating setting:', error);
+    throw error;
   }
 };
