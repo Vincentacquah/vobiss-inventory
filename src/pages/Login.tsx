@@ -20,23 +20,50 @@ const Login = () => {
     }
   }, [user, navigate]);
 
+  // Helper for role-based redirects
+  const getRoleBasedRedirect = (role) => {
+    switch (role) {
+      case 'requester':
+        return '/request-forms';
+      case 'approver':
+        return '/pending-approvals';
+      case 'issuer':
+        return '/items-out';
+      case 'superadmin':
+        return '/'; // Dashboard for overview
+      default:
+        return '/';
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     
-    // Smooth delay for visual feedback
+    // Smooth delay for visual feedback (consider removing in production)
     await new Promise(resolve => setTimeout(resolve, 1200));
     
     try {
       const data = await loginUser(username, password);
       login(data.token, data.user);
-      navigate('/');
+      
+      // Role-specific redirect
+      const redirectPath = getRoleBasedRedirect(data.user.role);
+      navigate(redirectPath);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle forgot password - For now, redirect to contact superadmin or show message
+  // In future, could integrate with email service to notify superadmin
+  const handleForgotPassword = () => {
+    // Placeholder: Show alert or modal explaining to contact superadmin
+    alert('For password resets, please contact your Super Admin. They can reset your password and email you a new one.');
+    // Could navigate to a support page or open email client: window.location.href = 'mailto:admin@vobiss.com?subject=Password Reset Request';
   };
 
   if (user) return null;
@@ -202,9 +229,12 @@ const Login = () => {
                   </label>
                 </div>
                 <div className="text-sm">
-                  <a href="#" className="font-medium text-blue-600 hover:text-blue-700 transition-colors">
+                  <button 
+                    onClick={handleForgotPassword}
+                    className="font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                  >
                     Forgot password?
-                  </a>
+                  </button>
                 </div>
               </div>
 
@@ -240,17 +270,17 @@ const Login = () => {
               </div>
             </form>
 
-            {/* Demo credentials button */}
+            {/* Demo credentials button - Updated for new default user */}
             <div className="mt-6 text-center">
               <button
                 type="button"
                 onClick={() => {
-                  setUsername('admin');
+                  setUsername('superadmin');
                   setPassword('admin123');
                 }}
                 className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
               >
-                Use demo credentials (admin / admin123)
+                Use demo credentials (superadmin / admin123)
               </button>
             </div>
           </div>

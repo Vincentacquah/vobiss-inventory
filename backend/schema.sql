@@ -76,3 +76,24 @@ CREATE INDEX IF NOT EXISTS idx_request_items_item_id ON request_items(item_id);
 CREATE INDEX IF NOT EXISTS idx_approvals_request_id ON approvals(request_id);
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_created_at ON requests(created_at);
+
+-- Add missing columns if they don't exist
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- Drop the temporary defaults (since NOT NULL, but if data exists, this assumes empty strings are ok)
+ALTER TABLE users ALTER COLUMN first_name DROP DEFAULT;
+ALTER TABLE users ALTER COLUMN last_name DROP DEFAULT;
+ALTER TABLE users ALTER COLUMN email DROP DEFAULT;
+
+-- Add role constraint
+ALTER TABLE users ADD CONSTRAINT check_role CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin'));
+
+-- If the original role default was 'user', update existing to 'requester' if needed
+UPDATE users SET role = 'requester' WHERE role = 'user';
+
+-- Index for better performance (optional)
+CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);

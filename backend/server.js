@@ -1,4 +1,4 @@
-// server.js
+// Updated server.js (key changes: auth middleware, user routes, updated login)
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -14,7 +14,8 @@ import {
   createRequest, getRequests, approveRequest, finalizeRequest, getRequestDetails,
   updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs,
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
-  initDB, getSettings, updateSetting
+  initDB, getSettings, updateSetting,
+  getUsers, createUser, resetUserPassword, updateUserRole
 } from './db.js';
 import pool from './db.js';
 import { sendLowStockAlert } from './emailService.js';
@@ -59,20 +60,48 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
 
+// JWT Auth Middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+const requireSuperAdmin = (req, res, next) => {
+  if (req.user.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Super Admin access required' });
+  }
+  next();
+};
+
 // Seed default user and init DB
 async function seedDefaultUser() {
   try {
     await initDB();
-    const defaultUsername = 'admin';
+    const defaultFirstName = 'Admin';
+    const defaultLastName = 'Super';
+    const defaultUsername = 'superadmin';
+    const defaultEmail = 'admin@vobiss.com';
     const defaultPassword = await bcrypt.hash('admin123', 10);
     const defaultRole = 'superadmin';
     const existing = await getUserByUsername(defaultUsername);
     if (!existing) {
       await pool.query(
-        'INSERT INTO users (username, password, role) VALUES ($1, $2, $3)',
-        [defaultUsername, defaultPassword, defaultRole]
+        'INSERT INTO users (first_name, last_name, username, email, password, role) VALUES ($1, $2, $3, $4, $5, $6)',
+        [defaultFirstName, defaultLastName, defaultUsername, defaultEmail, defaultPassword, defaultRole]
       );
-      console.log('Default user created: admin / admin123');
+      console.log('Default user created: Super Admin / admin123');
     } else {
       console.log('Default user already exists');
     }
@@ -96,27 +125,27 @@ app.post('/api/login', async (req, res) => {
     const ip = req.ip || req.connection.remoteAddress;
     const details = { userAgent: req.get('User-Agent') };
     await insertAuditLog(user.id, 'login', ip, details);
-    res.json({ token, user: { username: user.username, role: user.role } });
+    res.json({ 
+      token, 
+      user: { 
+        username: user.username, 
+        role: user.role,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        full_name: `${user.first_name} ${user.last_name}`.trim()
+      } 
+    });
   } catch (error) {
     console.error('Error in login:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/logout', async (req, res) => {
+app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const ip = req.ip || req.connection.remoteAddress;
-        const details = { userAgent: req.get('User-Agent') };
-        await insertAuditLog(decoded.id, 'logout', ip, details);
-      } catch (verifyError) {
-        console.warn('Invalid token on logout:', verifyError);
-      }
-    }
+    const ip = req.ip || req.connection.remoteAddress;
+    const details = { userAgent: req.get('User-Agent') };
+    await insertAuditLog(req.user.id, 'logout', ip, details);
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Error in logout:', error.stack);
@@ -124,7 +153,7 @@ app.post('/api/logout', async (req, res) => {
   }
 });
 
-app.get('/api/audit-logs', async (req, res) => {
+app.get('/api/audit-logs', authenticateToken, async (req, res) => {
   try {
     const logs = await getAuditLogs();
     res.json(logs);
@@ -134,8 +163,8 @@ app.get('/api/audit-logs', async (req, res) => {
   }
 });
 
-// Settings Routes
-app.get('/api/settings', async (req, res) => {
+// Settings Routes (add auth if needed)
+app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const settings = await getSettings();
     res.json(settings);
@@ -145,7 +174,7 @@ app.get('/api/settings', async (req, res) => {
   }
 });
 
-app.post('/api/settings/:key', async (req, res) => {
+app.post('/api/settings/:key', authenticateToken, async (req, res) => {
   try {
     const { key } = req.params;
     const { value } = req.body;
@@ -157,8 +186,8 @@ app.post('/api/settings/:key', async (req, res) => {
   }
 });
 
-// Supervisors Routes
-app.get('/api/supervisors', async (req, res) => {
+// Supervisors Routes (add auth)
+app.get('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const supervisors = await getSupervisors();
     res.json(supervisors);
@@ -168,7 +197,7 @@ app.get('/api/supervisors', async (req, res) => {
   }
 });
 
-app.post('/api/supervisors', async (req, res) => {
+app.post('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const supervisor = await addSupervisor(req.body);
     res.status(201).json(supervisor);
@@ -178,7 +207,7 @@ app.post('/api/supervisors', async (req, res) => {
   }
 });
 
-app.put('/api/supervisors/:id', async (req, res) => {
+app.put('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const supervisorId = parseInt(req.params.id);
     const supervisor = await updateSupervisor(supervisorId, req.body);
@@ -189,7 +218,7 @@ app.put('/api/supervisors/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/supervisors/:id', async (req, res) => {
+app.delete('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const result = await deleteSupervisor(parseInt(req.params.id));
     res.json(result);
@@ -199,8 +228,59 @@ app.delete('/api/supervisors/:id', async (req, res) => {
   }
 });
 
+// New Users Routes (Super Admin only)
+app.get('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const users = await getUsers();
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { first_name, last_name, email, role } = req.body;
+    if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+    const user = await createUser(first_name, last_name, email, role);
+    res.status(201).json(user);
+  } catch (error) {
+    console.error('Error creating user:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.post('/api/users/:id/reset-password', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const result = await resetUserPassword(userId);
+    res.json(result);
+  } catch (error) {
+    console.error('Error resetting password:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/users/:id/role', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const { role } = req.body;
+    if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+    const user = await updateUserRole(userId, role);
+    res.json(user);
+  } catch (error) {
+    console.error('Error updating user role:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
 // Dedicated route for manually triggering low stock alerts
-app.post('/api/send-low-stock-alert', async (req, res) => {
+app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
   try {
     // Optional: Accept a body param like { force: true } to override checks, but default to normal behavior
     const { force } = req.body;
@@ -215,8 +295,8 @@ app.post('/api/send-low-stock-alert', async (req, res) => {
   }
 });
 
-// Items Routes
-app.get('/api/items', async (req, res) => {
+// Items Routes (add auth where appropriate, e.g., superadmin for delete)
+app.get('/api/items', authenticateToken, async (req, res) => {
   try {
     const items = await getItems();
     res.json(items);
@@ -226,7 +306,7 @@ app.get('/api/items', async (req, res) => {
   }
 });
 
-app.post('/api/items', upload.single('receiptImage'), async (req, res) => {
+app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
     const itemData = req.body;
     let receiptImages = [];
@@ -250,7 +330,7 @@ app.post('/api/items', upload.single('receiptImage'), async (req, res) => {
   }
 });
 
-app.put('/api/items/:id', upload.single('receiptImage'), async (req, res) => {
+app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
     const itemId = parseInt(req.params.id);
     const currentItems = await getItems();
@@ -292,7 +372,7 @@ app.put('/api/items/:id', upload.single('receiptImage'), async (req, res) => {
   }
 });
 
-app.delete('/api/items/:id', async (req, res) => {
+app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     // Delete associated receipt images
     const currentItems = await getItems();
@@ -321,8 +401,8 @@ app.delete('/api/items/:id', async (req, res) => {
   }
 });
 
-// Categories Routes
-app.get('/api/categories', async (req, res) => {
+// Categories Routes (add auth)
+app.get('/api/categories', authenticateToken, async (req, res) => {
   try {
     const categories = await getCategories();
     res.json(categories);
@@ -332,7 +412,7 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-app.post('/api/categories', async (req, res) => {
+app.post('/api/categories', authenticateToken, async (req, res) => {
   try {
     const category = await addCategory(req.body);
     res.status(201).json(category);
@@ -342,7 +422,7 @@ app.post('/api/categories', async (req, res) => {
   }
 });
 
-app.put('/api/categories/:id', async (req, res) => {
+app.put('/api/categories/:id', authenticateToken, async (req, res) => {
   try {
     const category = await updateCategory(req.params.id, req.body);
     res.json(category);
@@ -352,7 +432,7 @@ app.put('/api/categories/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/categories/:id', async (req, res) => {
+app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const result = await deleteCategory(req.params.id);
     res.json(result);
@@ -362,8 +442,8 @@ app.delete('/api/categories/:id', async (req, res) => {
   }
 });
 
-// Items Out Routes
-app.get('/api/items-out', async (req, res) => {
+// Items Out Routes (add auth)
+app.get('/api/items-out', authenticateToken, async (req, res) => {
   try {
     const itemsOut = await getItemsOut();
     res.json(itemsOut);
@@ -373,7 +453,7 @@ app.get('/api/items-out', async (req, res) => {
   }
 });
 
-app.post('/api/items-out', async (req, res) => {
+app.post('/api/items-out', authenticateToken, async (req, res) => {
   console.log('Received issueItem request with data:', req.body);
   try {
     const itemOut = await issueItem(req.body);
@@ -388,7 +468,7 @@ app.post('/api/items-out', async (req, res) => {
 });
 
 // Low Stock Route
-app.get('/api/low-stock', async (req, res) => {
+app.get('/api/low-stock', authenticateToken, async (req, res) => {
   try {
     const lowStockItems = await getLowStockItems();
     res.json(lowStockItems);
@@ -399,7 +479,7 @@ app.get('/api/low-stock', async (req, res) => {
 });
 
 // Dashboard Stats Route
-app.get('/api/dashboard-stats', async (req, res) => {
+app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   try {
     const stats = await getDashboardStats();
     res.json(stats);
@@ -409,8 +489,8 @@ app.get('/api/dashboard-stats', async (req, res) => {
   }
 });
 
-// Requests Routes
-app.post('/api/requests', async (req, res) => {
+// Requests Routes (add auth, role checks if needed)
+app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
     const request = await createRequest(req.body);
     res.status(201).json(request);
@@ -420,7 +500,7 @@ app.post('/api/requests', async (req, res) => {
   }
 });
 
-app.get('/api/requests', async (req, res) => {
+app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
     const requests = await getRequests();
     res.json(requests);
@@ -430,7 +510,7 @@ app.get('/api/requests', async (req, res) => {
   }
 });
 
-app.put('/api/requests/:id', async (req, res) => {
+app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
     const result = await updateRequest(req.params.id, req.body);
     res.json(result);
@@ -440,7 +520,7 @@ app.put('/api/requests/:id', async (req, res) => {
   }
 });
 
-app.post('/api/requests/:id/reject', async (req, res) => {
+app.post('/api/requests/:id/reject', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const result = await rejectRequest(req.params.id);
     res.json(result);
@@ -450,7 +530,7 @@ app.post('/api/requests/:id/reject', async (req, res) => {
   }
 });
 
-app.post('/api/requests/:id/approve', async (req, res) => {
+app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   try {
     const result = await approveRequest(req.params.id, req.body);
     res.json(result);
@@ -460,7 +540,7 @@ app.post('/api/requests/:id/approve', async (req, res) => {
   }
 });
 
-app.post('/api/requests/:id/finalize', async (req, res) => {
+app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { items, releasedBy } = req.body;
     const result = await finalizeRequest(req.params.id, items, releasedBy);
@@ -471,7 +551,7 @@ app.post('/api/requests/:id/finalize', async (req, res) => {
   }
 });
 
-app.get('/api/requests/:id', async (req, res) => {
+app.get('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
     const request = await getRequestDetails(req.params.id);
     res.json(request);

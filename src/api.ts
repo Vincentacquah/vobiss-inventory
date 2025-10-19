@@ -6,6 +6,29 @@ const getAuthHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// Custom fetch wrapper to handle auth and 401 errors smoothly
+const apiFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...options.headers,
+      ...getAuthHeader(),
+    },
+  });
+
+  if (response.status === 401) {
+    localStorage.removeItem('token');
+    throw new Error('Session expired. Please log in again.');
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+  }
+
+  return response;
+};
+
 // Interfaces for type safety
 interface Item {
   id: number;
@@ -88,6 +111,7 @@ interface AuditLog {
   id: number;
   user_id: number;
   username?: string;
+  full_name?: string;
   action: string;
   ip_address: string;
   details: any;
@@ -101,20 +125,47 @@ interface Supervisor {
   created_at: string;
 }
 
-// Auth
-export const loginUser = async (username: string, password: string): Promise<{ token: string; user: { username: string; role: string } }> => {
+interface User {
+  id: number;
+  first_name: string;
+  last_name: string;
+  username: string;
+  email: string;
+  role: 'requester' | 'approver' | 'issuer' | 'superadmin';
+  created_at: string;
+}
+
+interface Setting {
+  key_name: string;
+  value: string;
+  description?: string;
+  updated_at: string;
+}
+
+// Helper function to fetch public IP
+const fetchPublicIP = async (): Promise<string> => {
   try {
-    const response = await fetch(`${API_URL}/login`, {
+    const response = await fetch('https://api.ipify.org?format=json');
+    if (!response.ok) throw new Error('Failed to fetch IP');
+    const data = await response.json();
+    return data.ip;
+  } catch (error) {
+    console.warn('Failed to fetch public IP, using fallback:', error);
+    return 'unknown';
+  }
+};
+
+// Auth
+export const loginUser = async (username: string, password: string, ip?: string): Promise<{ token: string; user: { username: string; role: string; first_name?: string; last_name?: string; full_name?: string } }> => {
+  try {
+    const effectiveIP = ip || await fetchPublicIP();
+    const response = await apiFetch(`${API_URL}/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ip: effectiveIP }),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to login');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error logging in:', error);
@@ -124,32 +175,88 @@ export const loginUser = async (username: string, password: string): Promise<{ t
 
 export const logoutUser = async (): Promise<void> => {
   try {
-    const response = await fetch(`${API_URL}/logout`, {
+    const response = await apiFetch(`${API_URL}/logout`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) {
-      console.warn('Logout API call failed');
-    }
   } catch (error) {
     console.error('Error logging out:', error);
     // Don't throw; logout should still clear local state
   }
 };
 
-// Supervisors
-export const getSupervisors = async (): Promise<Supervisor[]> => {
+// Users
+export const getUsers = async (): Promise<User[]> => {
   try {
-    const response = await fetch(`${API_URL}/supervisors`, {
+    const response = await apiFetch(`${API_URL}/users`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch supervisors');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    throw error;
+  }
+};
+
+export const createUser = async (firstName: string, lastName: string, email: string, role: string): Promise<User> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ first_name: firstName, last_name: lastName, email, role }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating user:', error);
+    throw error;
+  }
+};
+
+export const resetUserPassword = async (userId: number): Promise<{ message: string }> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/${userId}/reset-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    throw error;
+  }
+};
+
+export const updateUserRole = async (userId: number, role: string): Promise<User> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/${userId}/role`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ role }),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating role:', error);
+    throw error;
+  }
+};
+
+// Supervisors
+export const getSupervisors = async (): Promise<Supervisor[]> => {
+  try {
+    const response = await apiFetch(`${API_URL}/supervisors`, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
     return await response.json();
   } catch (error) {
     console.error('Error fetching supervisors:', error);
@@ -159,18 +266,13 @@ export const getSupervisors = async (): Promise<Supervisor[]> => {
 
 export const addSupervisor = async (supervisorData: { name: string; email: string }): Promise<Supervisor> => {
   try {
-    const response = await fetch(`${API_URL}/supervisors`, {
+    const response = await apiFetch(`${API_URL}/supervisors`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(supervisorData),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to add supervisor');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error adding supervisor:', error);
@@ -180,18 +282,13 @@ export const addSupervisor = async (supervisorData: { name: string; email: strin
 
 export const updateSupervisor = async (supervisorId: number, supervisorData: { name: string; email: string }): Promise<Supervisor> => {
   try {
-    const response = await fetch(`${API_URL}/supervisors/${supervisorId}`, {
+    const response = await apiFetch(`${API_URL}/supervisors/${supervisorId}`, {
       method: 'PUT',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(supervisorData),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update supervisor');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error updating supervisor:', error);
@@ -201,14 +298,12 @@ export const updateSupervisor = async (supervisorId: number, supervisorData: { n
 
 export const deleteSupervisor = async (supervisorId: number): Promise<boolean> => {
   try {
-    const response = await fetch(`${API_URL}/supervisors/${supervisorId}`, {
+    const response = await apiFetch(`${API_URL}/supervisors/${supervisorId}`, {
       method: 'DELETE',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to delete supervisor');
     return true;
   } catch (error) {
     console.error('Error deleting supervisor:', error);
@@ -219,13 +314,11 @@ export const deleteSupervisor = async (supervisorId: number): Promise<boolean> =
 // Items
 export const getItems = async (): Promise<Item[]> => {
   try {
-    const response = await fetch(`${API_URL}/items`, {
+    const response = await apiFetch(`${API_URL}/items`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch items');
     return await response.json();
   } catch (error) {
     console.error('Error fetching items:', error);
@@ -235,15 +328,11 @@ export const getItems = async (): Promise<Item[]> => {
 
 export const addItem = async (formData: FormData): Promise<Item> => {
   try {
-    const response = await fetch(`${API_URL}/items`, {
+    const response = await apiFetch(`${API_URL}/items`, {
       method: 'POST',
-      headers: getAuthHeader(),
+      headers: getAuthHeader(), // No Content-Type for FormData
       body: formData,
     });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to add item');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error adding item:', error);
@@ -253,15 +342,11 @@ export const addItem = async (formData: FormData): Promise<Item> => {
 
 export const updateItem = async (itemId: number, formData: FormData): Promise<Item> => {
   try {
-    const response = await fetch(`${API_URL}/items/${itemId}`, {
+    const response = await apiFetch(`${API_URL}/items/${itemId}`, {
       method: 'PUT',
-      headers: getAuthHeader(),
+      headers: getAuthHeader(), // No Content-Type for FormData
       body: formData,
     });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || 'Failed to update item');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error updating item:', error);
@@ -271,14 +356,12 @@ export const updateItem = async (itemId: number, formData: FormData): Promise<It
 
 export const deleteItem = async (itemId: number): Promise<boolean> => {
   try {
-    const response = await fetch(`${API_URL}/items/${itemId}`, {
+    const response = await apiFetch(`${API_URL}/items/${itemId}`, {
       method: 'DELETE',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to delete item');
     return true;
   } catch (error) {
     console.error('Error deleting item:', error);
@@ -289,13 +372,11 @@ export const deleteItem = async (itemId: number): Promise<boolean> => {
 // Categories
 export const getCategories = async (): Promise<Category[]> => {
   try {
-    const response = await fetch(`${API_URL}/categories`, {
+    const response = await apiFetch(`${API_URL}/categories`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch categories');
     return await response.json();
   } catch (error) {
     console.error('Error fetching categories:', error);
@@ -305,15 +386,13 @@ export const getCategories = async (): Promise<Category[]> => {
 
 export const addCategory = async (categoryData: { name: string; description?: string }): Promise<Category> => {
   try {
-    const response = await fetch(`${API_URL}/categories`, {
+    const response = await apiFetch(`${API_URL}/categories`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(categoryData),
     });
-    if (!response.ok) throw new Error('Failed to add category');
     return await response.json();
   } catch (error) {
     console.error('Error adding category:', error);
@@ -323,15 +402,13 @@ export const addCategory = async (categoryData: { name: string; description?: st
 
 export const updateCategory = async (categoryId: number, categoryData: { name: string; description?: string }): Promise<Category> => {
   try {
-    const response = await fetch(`${API_URL}/categories/${categoryId}`, {
+    const response = await apiFetch(`${API_URL}/categories/${categoryId}`, {
       method: 'PUT',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(categoryData),
     });
-    if (!response.ok) throw new Error('Failed to update category');
     return await response.json();
   } catch (error) {
     console.error('Error updating category:', error);
@@ -341,14 +418,12 @@ export const updateCategory = async (categoryId: number, categoryData: { name: s
 
 export const deleteCategory = async (categoryId: number): Promise<boolean> => {
   try {
-    const response = await fetch(`${API_URL}/categories/${categoryId}`, {
+    const response = await apiFetch(`${API_URL}/categories/${categoryId}`, {
       method: 'DELETE',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to delete category');
     return true;
   } catch (error) {
     console.error('Error deleting category:', error);
@@ -359,13 +434,11 @@ export const deleteCategory = async (categoryId: number): Promise<boolean> => {
 // Items Out
 export const getItemsOut = async (): Promise<ItemOut[]> => {
   try {
-    const response = await fetch(`${API_URL}/items-out`, {
+    const response = await apiFetch(`${API_URL}/items-out`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch items out');
     return await response.json();
   } catch (error) {
     console.error('Error fetching items out:', error);
@@ -375,10 +448,9 @@ export const getItemsOut = async (): Promise<ItemOut[]> => {
 
 export const issueItem = async (issueData: { personName: string; itemId: number; quantity: number }): Promise<ItemOut> => {
   try {
-    const response = await fetch(`${API_URL}/items-out`, {
+    const response = await apiFetch(`${API_URL}/items-out`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -387,10 +459,6 @@ export const issueItem = async (issueData: { personName: string; itemId: number;
         quantity: issueData.quantity,
       }),
     });
-    if (!response.ok) {
-      const errorText = await response.text();
-         throw new Error(`Failed to issue item: ${errorText || 'Server error'}`);
-    }
     return await response.json();
   } catch (error) {
     console.error('Error issuing item:', error);
@@ -401,13 +469,11 @@ export const issueItem = async (issueData: { personName: string; itemId: number;
 // Low Stock
 export const getLowStockItems = async (): Promise<Item[]> => {
   try {
-    const response = await fetch(`${API_URL}/low-stock`, {
+    const response = await apiFetch(`${API_URL}/low-stock`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch low stock items');
     return await response.json();
   } catch (error) {
     console.error('Error fetching low stock items:', error);
@@ -424,13 +490,11 @@ export const getDashboardStats = async (): Promise<{
   pendingRequests: number;
 }> => {
   try {
-    const response = await fetch(`${API_URL}/dashboard-stats`, {
+    const response = await apiFetch(`${API_URL}/dashboard-stats`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch dashboard stats');
     return await response.json();
   } catch (error) {
     console.error('Error fetching dashboard stats:', error);
@@ -458,18 +522,13 @@ export const createRequest = async (requestData: {
   items: { name: string; requested: number }[];
 }): Promise<Request> => {
   try {
-    const response = await fetch(`${API_URL}/requests`, {
+    const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestData),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to create request');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error creating request:', error);
@@ -479,13 +538,11 @@ export const createRequest = async (requestData: {
 
 export const getRequests = async (): Promise<Request[]> => {
   try {
-    const response = await fetch(`${API_URL}/requests`, {
+    const response = await apiFetch(`${API_URL}/requests`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch requests');
     return await response.json();
   } catch (error) {
     console.error('Error fetching requests:', error);
@@ -504,18 +561,13 @@ export const updateRequest = async (id: string | number, requestData: {
   items: { name: string; requested: number }[];
 }): Promise<{ message: string }> => {
   try {
-    const response = await fetch(`${API_URL}/requests/${id}`, {
+    const response = await apiFetch(`${API_URL}/requests/${id}`, {
       method: 'PUT',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestData),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update request');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error updating request:', error);
@@ -525,17 +577,12 @@ export const updateRequest = async (id: string | number, requestData: {
 
 export const rejectRequest = async (id: string | number): Promise<{ message: string }> => {
   try {
-    const response = await fetch(`${API_URL}/requests/${id}/reject`, {
+    const response = await apiFetch(`${API_URL}/requests/${id}/reject`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to reject request');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error rejecting request:', error);
@@ -545,16 +592,11 @@ export const rejectRequest = async (id: string | number): Promise<{ message: str
 
 export const getRequestDetails = async (id: string | number): Promise<RequestDetails> => {
   try {
-    const response = await fetch(`${API_URL}/requests/${id}`, {
+    const response = await apiFetch(`${API_URL}/requests/${id}`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to fetch request details');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error fetching request details:', error);
@@ -564,18 +606,13 @@ export const getRequestDetails = async (id: string | number): Promise<RequestDet
 
 export const approveRequest = async (id: string | number, data: { approverName: string; signature: string }): Promise<{ message: string }> => {
   try {
-    const response = await fetch(`${API_URL}/requests/${id}/approve`, {
+    const response = await apiFetch(`${API_URL}/requests/${id}/approve`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to approve request');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error approving request:', error);
@@ -585,10 +622,9 @@ export const approveRequest = async (id: string | number, data: { approverName: 
 
 export const finalizeRequest = async (id: string | number, items: { itemId: number; quantityReceived: number; quantityReturned: number }[], releasedBy: string): Promise<{ message: string }> => {
   try {
-    const response = await fetch(`${API_URL}/requests/${id}/finalize`, {
+    const response = await apiFetch(`${API_URL}/requests/${id}/finalize`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
@@ -596,10 +632,6 @@ export const finalizeRequest = async (id: string | number, items: { itemId: numb
         releasedBy
       }),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to finalize request');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error finalizing request:', error);
@@ -610,13 +642,11 @@ export const finalizeRequest = async (id: string | number, items: { itemId: numb
 // Audit Logs
 export const getAuditLogs = async (): Promise<AuditLog[]> => {
   try {
-    const response = await fetch(`${API_URL}/audit-logs`, {
+    const response = await apiFetch(`${API_URL}/audit-logs`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch audit logs');
     return await response.json();
   } catch (error) {
     console.error('Error fetching audit logs:', error);
@@ -624,24 +654,14 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
   }
 };
 
-// api.ts (add these to the existing API file)
-interface Setting {
-  key_name: string;
-  value: string;
-  description?: string;
-  updated_at: string;
-}
-
 // Settings
 export const getSettings = async (): Promise<{ [key: string]: string; all: Setting[] }> => {
   try {
-    const response = await fetch(`${API_URL}/settings`, {
+    const response = await apiFetch(`${API_URL}/settings`, {
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
     });
-    if (!response.ok) throw new Error('Failed to fetch settings');
     return await response.json();
   } catch (error) {
     console.error('Error fetching settings:', error);
@@ -651,18 +671,13 @@ export const getSettings = async (): Promise<{ [key: string]: string; all: Setti
 
 export const updateSetting = async (key: string, value: string): Promise<{ key: string; value: string }> => {
   try {
-    const response = await fetch(`${API_URL}/settings/${key}`, {
+    const response = await apiFetch(`${API_URL}/settings/${key}`, {
       method: 'POST',
       headers: {
-        ...getAuthHeader(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ value }),
     });
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Failed to update setting');
-    }
     return await response.json();
   } catch (error) {
     console.error('Error updating setting:', error);

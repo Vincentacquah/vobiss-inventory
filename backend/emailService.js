@@ -60,6 +60,256 @@ try {
   logoBase64 = null;
 }
 
+// Send user credentials email
+export async function sendUserCredentials(email, username, password) {
+  try {
+    if (!transporter) {
+      throw new Error('Email transporter not initialized');
+    }
+
+    const settings = await getSettings();
+    const fromName = settings ? settings.from_name : 'Inventory System';
+    const fromEmail = settings ? settings.from_email : process.env.SMTP_USER || 'helloriceug@gmail.com';
+
+    // Improved logo centering with fallback
+    const logoImg = logoBase64 
+      ? `<div style="text-align: center; margin-bottom: 10px;"><img src="data:image/png;base64,${logoBase64}" alt="Vobiss Logo" style="height: 40px; width: auto; max-width: 100%; display: block; margin: 0 auto; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>`
+      : '<div style="text-align: center; margin-bottom: 10px;"><p style="font-size: 18px; font-weight: bold; color: #fff; margin: 0;">Vobiss Inventory</p></div>';
+
+    const mailOptions = {
+      from: `"${fromName}" <${fromEmail}>`,
+      to: email,
+      subject: 'Welcome to Vobiss Inventory System - Your Account Details',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { 
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+              background-color: white; 
+              margin: 0; 
+              padding: 0; 
+              line-height: 1.6;
+            }
+            .container { 
+              max-width: 600px; 
+              margin: 0 auto; 
+              padding: 20px; 
+              background-color: white; 
+            }
+            .header { 
+              background: linear-gradient(135deg, #2E7D32, #4CAF50); /* Green gradient for inventory theme */
+              color: white; 
+              padding: 30px 20px; 
+              text-align: center; 
+              border-radius: 12px 12px 0 0; 
+              box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3);
+            }
+            .header h1 { 
+              margin: 0 0 10px 0; 
+              font-size: 28px; 
+              font-weight: 300;
+            }
+            .content { 
+              background: white; 
+              padding: 30px; 
+              border-radius: 0 0 12px 12px; 
+              box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
+            }
+            .credentials { 
+              background: #f0f9ff; 
+              padding: 20px; 
+              border-radius: 8px; 
+              margin: 20px 0; 
+              border-left: 4px solid #0ea5e9; 
+            }
+            .credentials p { 
+              margin: 10px 0; 
+              font-size: 16px; 
+            }
+            .credentials strong { 
+              color: #0c4a6e; 
+            }
+            .footer { 
+              text-align: center; 
+              font-size: 14px; 
+              color: #666; 
+              margin-top: 30px; 
+              padding-top: 20px; 
+              border-top: 1px solid #eee; 
+              background: #f9f9f9; 
+              padding: 20px; 
+              border-radius: 0 0 12px 12px;
+            }
+            @media (max-width: 600px) {
+              .container { padding: 10px; }
+              .header, .content { padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              ${logoImg}
+              <h1>Welcome to Vobiss Inventory!</h1>
+              <p style="margin: 5px 0 0 0; opacity: 0.9;">Your Account Has Been Created</p>
+            </div>
+            <div class="content">
+              <p>Dear User,</p>
+              <p>Your account has been successfully created by your administrator.</p>
+              <div class="credentials">
+                <p><strong>Username:</strong> ${username}</p>
+                <p><strong>Temporary Password:</strong> ${password}</p>
+                <p><em>Please log in and change your password immediately for security.</em></p>
+              </div>
+              <p>If you have any questions or did not request this account, please contact your administrator.</p>
+            </div>
+            <div class="footer">
+              <p>Best regards,<br><strong>Vobiss Inventory Management System</strong></p>
+              <p>Vobiss Team</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('User credentials email sent successfully:', info.messageId);
+  } catch (error) {
+    console.error('Error sending user credentials email:', error);
+    throw new Error(`Failed to send welcome email: ${error.message}`);
+  }
+}
+
+// Send password reset email
+export async function sendResetPassword(email, username, password) {
+  try {
+    if (!transporter) {
+      throw new Error('Email transporter not initialized');
+    }
+
+    const settings = await getSettings();
+    const fromName = settings ? settings.from_name : 'Inventory System';
+    const fromEmail = settings ? settings.from_email : process.env.SMTP_USER || 'helloriceug@gmail.com';
+
+    // Improved logo centering with fallback
+    const logoImg = logoBase64 
+      ? `<div style="text-align: center; margin-bottom: 10px;"><img src="data:image/png;base64,${logoBase64}" alt="Vobiss Logo" style="height: 40px; width: auto; max-width: 100%; display: block; margin: 0 auto; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>`
+      : '<div style="text-align: center; margin-bottom: 10px;"><p style="font-size: 18px; font-weight: bold; color: #fff; margin: 0;">Vobiss Inventory</p></div>';
+
+    const mailOptions = {
+      from: `"${fromName}" <${fromEmail}>`,
+      to: email,
+      subject: 'Vobiss Inventory System - Password Reset Confirmation',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body { 
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+              background-color: white; 
+              margin: 0; 
+              padding: 0; 
+              line-height: 1.6;
+            }
+            .container { 
+              max-width: 600px; 
+              margin: 0 auto; 
+              padding: 20px; 
+              background-color: white; 
+            }
+            .header { 
+              background: linear-gradient(135deg, #dc2626, #ef4444); /* Red gradient for reset alert */
+              color: white; 
+              padding: 30px 20px; 
+              text-align: center; 
+              border-radius: 12px 12px 0 0; 
+              box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
+            }
+            .header h1 { 
+              margin: 0 0 10px 0; 
+              font-size: 28px; 
+              font-weight: 300;
+            }
+            .content { 
+              background: white; 
+              padding: 30px; 
+              border-radius: 0 0 12px 12px; 
+              box-shadow: 0 4px 12px rgba(0,0,0,0.1); 
+            }
+            .credentials { 
+              background: #fef2f2; 
+              padding: 20px; 
+              border-radius: 8px; 
+              margin: 20px 0; 
+              border-left: 4px solid #dc2626; 
+            }
+            .credentials p { 
+              margin: 10px 0; 
+              font-size: 16px; 
+            }
+            .credentials strong { 
+              color: #991b1b; 
+            }
+            .footer { 
+              text-align: center; 
+              font-size: 14px; 
+              color: #666; 
+              margin-top: 30px; 
+              padding-top: 20px; 
+              border-top: 1px solid #eee; 
+              background: #f9f9f9; 
+              padding: 20px; 
+              border-radius: 0 0 12px 12px;
+            }
+            @media (max-width: 600px) {
+              .container { padding: 10px; }
+              .header, .content { padding: 20px; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              ${logoImg}
+              <h1>Password Reset Confirmation</h1>
+              <p style="margin: 5px 0 0 0; opacity: 0.9;">Vobiss Inventory Management System</p>
+            </div>
+            <div class="content">
+              <p>Dear User,</p>
+              <p>Your password has been reset by an administrator.</p>
+              <div class="credentials">
+                <p><strong>Username:</strong> ${username}</p>
+                <p><strong>New Temporary Password:</strong> ${password}</p>
+                <p><em>Please log in and change your password immediately for security.</em></p>
+              </div>
+              <p>If you did not request this reset, please contact your administrator immediately.</p>
+            </div>
+            <div class="footer">
+              <p>Best regards,<br><strong>Vobiss Inventory Management System</strong></p>
+              <p>Vobiss Team</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Password reset email sent successfully:', info.messageId);
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    throw new Error(`Failed to send reset email: ${error.message}`);
+  }
+}
+
 // Sends summary of ALL low stock items
 // Wrapped in try-catch to prevent main operations from failing
 export async function sendLowStockAlert(triggeredItem = null) {

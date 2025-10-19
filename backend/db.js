@@ -1,8 +1,10 @@
+// Updated db.js
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto'; // For password generation
 
 // Load environment variables
 config({ path: './.env' });
@@ -25,18 +27,58 @@ const pool = new Pool({
   password: String(process.env.PG_PASSWORD || ''),
 });
 
+// Function to generate unique 6-character password
+function generatePassword() {
+  return crypto.randomBytes(3).toString('hex').toUpperCase();
+}
+
+// Function to generate unique username based on last name
+async function generateUniqueUsername(lastName) {
+  let baseUsername = lastName.toLowerCase().trim().replace(/\s+/g, '');
+  let username = baseUsername;
+  let counter = 1;
+  while (true) {
+    const exists = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
+    if (exists.rowCount === 0) {
+      return username;
+    }
+    username = `${baseUsername}${counter}`;
+    counter++;
+  }
+}
+
 // Initialize database tables
 export async function initDB() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
+        first_name VARCHAR(255) NOT NULL,
+        last_name VARCHAR(255) NOT NULL,
         username VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) DEFAULT 'user',
+        role VARCHAR(50) DEFAULT 'requester' CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Add new columns if they don't exist (migration)
+    try {
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255) NOT NULL DEFAULT '';`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT '';`);
+      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE NOT NULL DEFAULT '';`);
+      await pool.query(`ALTER TABLE users ALTER COLUMN first_name DROP DEFAULT;`);
+      await pool.query(`ALTER TABLE users ALTER COLUMN last_name DROP DEFAULT;`);
+      await pool.query(`ALTER TABLE users ALTER COLUMN email DROP DEFAULT;`);
+      await pool.query(`ALTER TABLE users ADD CONSTRAINT check_role CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin'));`);
+    } catch (alterError) {
+      if (!alterError.message.includes('already exists') && !alterError.message.includes('already have')) {
+        console.warn('Warning during user schema migration:', alterError.message);
+      }
+    }
+
+    // Other tables remain the same...
     await pool.query(`
       CREATE TABLE IF NOT EXISTS supervisors (
         id SERIAL PRIMARY KEY,
@@ -180,7 +222,7 @@ export async function initDB() {
   }
 }
 
-// Settings
+// Settings functions remain the same...
 export async function getSettings() {
   try {
     const result = await pool.query('SELECT * FROM settings ORDER BY key_name ASC');
@@ -215,10 +257,10 @@ export async function updateSetting(keyName, value) {
   }
 }
 
-// Users
+// Updated Users functions with audit logging
 export async function getUserByUsername(username) {
   try {
-    const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const result = await pool.query('SELECT id, first_name, last_name, username, email, password, role FROM users WHERE username = $1', [username]);
     return result.rows[0];
   } catch (error) {
     console.error('Error fetching user:', error.stack);
@@ -226,7 +268,108 @@ export async function getUserByUsername(username) {
   }
 }
 
-// Supervisors
+export async function getUsers() {
+  try {
+    const result = await pool.query('SELECT id, first_name, last_name, username, email, role, created_at FROM users ORDER BY created_at DESC');
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching users:', error.stack);
+    throw error;
+  }
+}
+
+export async function createUser(firstName, lastName, email, role, userId, ip) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const username = await generateUniqueUsername(lastName);
+    const plainPassword = generatePassword();
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    const result = await client.query(
+      'INSERT INTO users (first_name, last_name, username, email, password, role, created_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP) RETURNING *',
+      [firstName.trim(), lastName.trim(), username, email.trim().toLowerCase(), hashedPassword, role]
+    );
+
+    // Log audit
+    await insertAuditLog(client, userId, 'create_user', ip, { username, role });
+
+    // Send email (import and call from emailService)
+    const { sendUserCredentials } = await import('./emailService.js');
+    await sendUserCredentials(email, username, plainPassword);
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating user:', error.stack);
+    if (error.code === '23505') {
+      throw new Error('Email already exists');
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function resetUserPassword(userId, currentUserId, ip) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const userResult = await client.query('SELECT email, username FROM users WHERE id = $1', [userId]);
+    if (userResult.rowCount === 0) throw new Error('User not found');
+    const { email, username } = userResult.rows[0];
+    const plainPassword = generatePassword();
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
+
+    await client.query(
+      'UPDATE users SET password = $1 WHERE id = $2 RETURNING *',
+      [hashedPassword, userId]
+    );
+
+    // Log audit
+    await insertAuditLog(client, currentUserId, 'reset_password', ip, { user_id: userId });
+
+    // Send reset email
+    const { sendResetPassword } = await import('./emailService.js');
+    await sendResetPassword(email, username, plainPassword);
+
+    await client.query('COMMIT');
+    return { message: 'Password reset and email sent' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error resetting password:', error.stack);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateUserRole(userId, role, currentUserId, ip) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(
+      'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
+      [role, userId]
+    );
+    if (result.rowCount === 0) throw new Error('User not found');
+
+    // Log audit
+    await insertAuditLog(client, currentUserId, 'update_user_role', ip, { user_id: userId, new_role: role });
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating user role:', error.stack);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Supervisors functions remain the same...
 export async function getSupervisors() {
   try {
     const result = await pool.query('SELECT * FROM supervisors ORDER BY name ASC');
@@ -289,12 +432,30 @@ export async function deleteSupervisor(supervisorId) {
   }
 }
 
-// Audit Logs
-export async function insertAuditLog(userId, action, ip, details = null) {
+// Updated Audit Logs to include full name
+export async function insertAuditLog(clientOrPool, userId, action, ip, details = null) {
+  let client = pool;
+  let uid = userId;
+  let act = action;
+  let iip = ip;
+  let det = details;
+
+  if (clientOrPool === null || clientOrPool === undefined) {
+    // no client provided, use pool
+  } else if (clientOrPool && typeof clientOrPool === 'object' && typeof clientOrPool.query === 'function') {
+    client = clientOrPool;
+  } else {
+    // first arg is actually userId, shift the arguments
+    det = iip;
+    iip = act;
+    act = uid;
+    uid = clientOrPool;
+  }
+
   try {
-    await pool.query(
+    await client.query(
       'INSERT INTO audit_logs (user_id, action, ip_address, details, timestamp) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
-      [userId, action, ip, details ? JSON.stringify(details) : null]
+      [uid, act, iip, det ? JSON.stringify(det) : null]
     );
   } catch (error) {
     console.error('Error inserting audit log:', error.stack);
@@ -305,19 +466,22 @@ export async function insertAuditLog(userId, action, ip, details = null) {
 export async function getAuditLogs() {
   try {
     const result = await pool.query(`
-      SELECT al.*, u.username 
+      SELECT al.*, u.first_name, u.last_name, u.username 
       FROM audit_logs al 
       LEFT JOIN users u ON al.user_id = u.id 
       ORDER BY al.timestamp DESC
     `);
-    return result.rows;
+    return result.rows.map(row => ({
+      ...row,
+      full_name: `${row.first_name} ${row.last_name}`.trim()
+    }));
   } catch (error) {
     console.error('Error fetching audit logs:', error.stack);
     throw error;
   }
 }
 
-// Categories
+// Categories functions with audit logging
 export async function getCategories() {
   try {
     const categoriesResult = await pool.query('SELECT * FROM categories ORDER BY created_at DESC');
@@ -336,47 +500,80 @@ export async function getCategories() {
   }
 }
 
-export async function addCategory(categoryData) {
+export async function addCategory(categoryData, userId, ip) {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { name, description } = categoryData;
-    const result = await pool.query(
+    const result = await client.query(
       'INSERT INTO categories (name, description, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) RETURNING *',
       [name, description || null]
     );
+
+    // Log audit
+    await insertAuditLog(client, userId, 'create_category', ip, { category_name: name });
+
+    await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error adding category:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-export async function updateCategory(categoryId, categoryData) {
+export async function updateCategory(categoryId, categoryData, userId, ip) {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { name, description } = categoryData;
-    const result = await pool.query(
+    const current = await client.query('SELECT name FROM categories WHERE id = $1', [categoryId]);
+    if (current.rowCount === 0) throw new Error('Category not found');
+    const result = await client.query(
       'UPDATE categories SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
       [name, description || null, categoryId]
     );
     if (result.rowCount === 0) throw new Error('Category not found');
+
+    // Log audit
+    await insertAuditLog(client, userId, 'update_category', ip, { category_id: categoryId });
+
+    await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error updating category:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-export async function deleteCategory(categoryId) {
+export async function deleteCategory(categoryId, userId, ip) {
+  const client = await pool.connect();
   try {
-    const result = await pool.query('DELETE FROM categories WHERE id = $1 RETURNING *', [categoryId]);
-    if (result.rowCount === 0) throw new Error('Category not found');
+    await client.query('BEGIN');
+    const current = await client.query('SELECT name FROM categories WHERE id = $1', [categoryId]);
+    if (current.rowCount === 0) throw new Error('Category not found');
+    await client.query('DELETE FROM categories WHERE id = $1 RETURNING *', [categoryId]);
+
+    // Log audit
+    await insertAuditLog(client, userId, 'delete_category', ip, { category_id: categoryId, category_name: current.rows[0]?.name });
+
+    await client.query('COMMIT');
     return { message: 'Category deleted' };
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error deleting category:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-// Items
+// Items functions with audit logging
 export async function getItems() {
   try {
     const result = await pool.query(`
@@ -393,8 +590,10 @@ export async function getItems() {
   }
 }
 
-export async function addItem(itemData) {
+export async function addItem(itemData, userId, ip) {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, receipt_images } = itemData;
     
     const parsedQuantity = parseInt(quantity, 10);
@@ -413,20 +612,27 @@ export async function addItem(itemData) {
       throw new Error('Unit price must be non-negative if provided');
     }
 
-    const result = await pool.query(
+    const result = await client.query(
       'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL) RETURNING *',
       [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
     );
 
+    // Log audit
+    await insertAuditLog(client, userId, 'create_item', ip, { item_name: name });
+
+    await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error adding item:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-// Items update with low stock check
-export async function updateItem(itemId, itemData) {
+// Items update with low stock check and audit logging
+export async function updateItem(itemId, itemData, userId, ip) {
   const client = await pool.connect();
   let prevQuantity = 0;
   let threshold = 5;
@@ -501,6 +707,9 @@ export async function updateItem(itemId, itemData) {
     );
     if (result.rowCount === 0) throw new Error('Item not found');
 
+    // Log audit
+    await insertAuditLog(client, userId, 'update_item', ip, { item_id: itemId, reason: update_reason });
+
     await client.query('COMMIT');
 
     const updatedItem = result.rows[0];
@@ -523,10 +732,12 @@ export async function updateItem(itemId, itemData) {
   }
 }
 
-export async function deleteItem(itemId) {
+export async function deleteItem(itemId, userId, ip) {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     // Delete associated receipt images
-    const itemResult = await pool.query('SELECT receipt_images FROM items WHERE id = $1', [itemId]);
+    const itemResult = await client.query('SELECT receipt_images, name FROM items WHERE id = $1', [itemId]);
     if (itemResult.rowCount > 0) {
       const receiptImages = itemResult.rows[0].receipt_images ? JSON.parse(itemResult.rows[0].receipt_images) : [];
       receiptImages.forEach((imgObj) => {
@@ -539,16 +750,23 @@ export async function deleteItem(itemId) {
       });
     }
     
-    const result = await pool.query('DELETE FROM items WHERE id = $1 RETURNING *', [itemId]);
-    if (result.rowCount === 0) throw new Error('Item not found');
+    await client.query('DELETE FROM items WHERE id = $1 RETURNING *', [itemId]);
+
+    // Log audit
+    await insertAuditLog(client, userId, 'delete_item', ip, { item_id: itemId, item_name: itemResult.rows[0]?.name });
+
+    await client.query('COMMIT');
     return { message: 'Item deleted' };
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error deleting item:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-// Items Out
+// Items Out functions with audit logging
 export async function getItemsOut() {
   try {
     const result = await pool.query(`
@@ -573,7 +791,7 @@ export async function getItemsOut() {
   }
 }
 
-export async function issueItem(issueData) {
+export async function issueItem(issueData, userId, ip) {
   const client = await pool.connect();
   let prevQuantity = 0;
   let threshold = 5;
@@ -590,7 +808,7 @@ export async function issueItem(issueData) {
       throw new Error('Quantity must be positive');
     }
     const itemCheck = await client.query(
-      'SELECT quantity, low_stock_threshold FROM items WHERE id = $1 FOR UPDATE',
+      'SELECT quantity, low_stock_threshold, name FROM items WHERE id = $1 FOR UPDATE',
       [itemId]
     );
     if (itemCheck.rowCount === 0) throw new Error('Item not found');
@@ -613,6 +831,9 @@ export async function issueItem(issueData) {
     const updatedItemResult = await client.query('SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN vendors v ON i.vendor_id = v.id WHERE i.id = $1', [itemId]);
     itemDetails = updatedItemResult.rows[0];
 
+    // Log audit
+    await insertAuditLog(client, userId, 'issue_item', ip, { item_id: itemId, item_name: itemCheck.rows[0].name, quantity: parsedIssueQuantity, person_name: personName });
+
     await client.query('COMMIT');
 
     return { ...result.rows[0], item: itemDetails };
@@ -626,7 +847,7 @@ export async function issueItem(issueData) {
   }
 }
 
-// Low Stock and Dashboard Stats
+// Low Stock and Dashboard Stats remain the same...
 export async function getLowStockItems() {
   try {
     const result = await pool.query(`
@@ -666,8 +887,8 @@ export async function getDashboardStats() {
   }
 }
 
-// Requests
-export async function createRequest(requestData) {
+// Requests functions with audit logging
+export async function createRequest(requestData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -686,6 +907,10 @@ export async function createRequest(requestData) {
         [requestId, selectedItem.rows[0].id, quantityRequested]
       );
     }
+
+    // Log audit
+    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId });
+
     await client.query('COMMIT');
     return requestResult.rows[0];
   } catch (error) {
@@ -713,7 +938,7 @@ export async function getRequests() {
   }
 }
 
-export async function updateRequest(requestId, requestData) {
+export async function updateRequest(requestId, requestData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -733,6 +958,10 @@ export async function updateRequest(requestId, requestData) {
         [requestId, selectedItem.rows[0].id, item.requested]
       );
     }
+
+    // Log audit
+    await insertAuditLog(client, userId, 'update_request', ip, { request_id: requestId });
+
     await client.query('COMMIT');
     return { message: 'Request updated' };
   } catch (error) {
@@ -744,21 +973,31 @@ export async function updateRequest(requestId, requestData) {
   }
 }
 
-export async function rejectRequest(requestId) {
+export async function rejectRequest(requestId, userId, ip) {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+    const result = await client.query(
       'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status = $3 RETURNING *',
       ['rejected', requestId, 'pending']
     );
     if (result.rowCount === 0) throw new Error('Request not found or not pending');
+
+    // Log audit
+    await insertAuditLog(client, userId, 'reject_request', ip, { request_id: requestId });
+
+    await client.query('COMMIT');
     return { message: 'Request rejected' };
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error rejecting request:', error.stack);
     throw error;
+  } finally {
+    client.release();
   }
 }
 
-export async function approveRequest(requestId, approverData) {
+export async function approveRequest(requestId, approverData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -777,6 +1016,9 @@ export async function approveRequest(requestId, approverData) {
         ['approved', requestId]
       );
     }
+    // Log audit
+    await insertAuditLog(client, userId, 'approve_request', ip, { request_id: requestId, approver_name: approverName });
+
     await client.query('COMMIT');
     return { message: 'Approval recorded' };
   } catch (error) {
@@ -788,7 +1030,7 @@ export async function approveRequest(requestId, approverData) {
   }
 }
 
-export async function finalizeRequest(requestId, items, releasedBy) {
+export async function finalizeRequest(requestId, items, releasedBy, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -825,6 +1067,10 @@ export async function finalizeRequest(requestId, items, releasedBy) {
       'UPDATE requests SET status = $1, release_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
       ['completed', releasedBy, requestId]
     );
+
+    // Log audit
+    await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy });
+
     await client.query('COMMIT');
     return { message: 'Request finalized' };
   } catch (error) {
@@ -874,3 +1120,9 @@ process.on('SIGTERM', async () => {
   await pool.end();
   console.log('Database connection pool closed');
 });
+
+// Note on IP Address Logging: In your API routes (e.g., login, createRequest, etc.), extract the public IP like this:
+// const ip = req.body.ip || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection.remoteAddress || 'unknown';
+// Then pass it to the DB functions, e.g., await createRequest(data, req.user.id, ip);
+// For login: After successful auth, await insertAuditLog(null, userId, 'login', ip);
+// This ensures audit logs capture the real public IP from the request.

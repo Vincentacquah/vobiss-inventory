@@ -1,3 +1,4 @@
+// Updated Sidebar.tsx with role-based menu filtering (remove Approved Forms for Approver)
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -71,21 +72,75 @@ const Sidebar = ({ isOpen, onToggle }) => {
     setIsLoggingOut(false);
   };
 
-  const menuItems = [
-    { icon: BarChart3, label: 'Dashboard', path: '/' },
-    { icon: Package, label: 'Items', path: '/inventory' },
-    { icon: Tags, label: 'Categories', path: '/categories' },
-    { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
-    { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
-    ...(user?.role === 'superadmin' ? [{ icon: Users, label: 'Supervisors', path: '/supervisors' }] : []),
-    { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
-    { icon: Clock, label: 'Pending Approvals', path: '/pending-approvals' },
-    { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
-    { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
-    { icon: FileText, label: 'Reports', path: '/reports' },
-    { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
-    { icon: Settings, label: 'Settings', path: '/settings' },
-  ];
+  // Role-based menu items
+  const getMenuItems = () => {
+    const baseItems = [
+      { icon: BarChart3, label: 'Dashboard', path: '/' },
+      { icon: Package, label: 'Items', path: '/inventory' },
+      { icon: Tags, label: 'Categories', path: '/categories' },
+      { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
+      { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
+    ];
+
+    const requestFormsItems = [
+      { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
+    ];
+
+    const approvalsItems = [
+      { icon: Clock, label: 'Pending Approvals', path: '/pending-approvals' },
+    ];
+
+    const approvedFormsItem = [
+      { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
+    ];
+
+    const adminItems = [
+      { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
+      { icon: Settings, label: 'Settings', path: '/settings' },
+    ];
+
+    const superAdminItems = [
+      { icon: Users, label: 'Users', path: '/users' },
+      { icon: Users, label: 'Supervisors', path: '/supervisors' },
+    ];
+
+    const role = user?.role;
+
+    let menuItems = [...baseItems];
+
+    if (role === 'requester') {
+      // Only Request Forms
+      menuItems = [...requestFormsItems];
+    } else if (role === 'approver') {
+      // Request Forms + Pending Approvals (no Approved Forms)
+      menuItems = [...requestFormsItems, ...approvalsItems];
+    } else if (role === 'issuer') {
+      // Everything except Users, Pending Approvals, Settings
+      menuItems = [
+        ...baseItems,
+        ...requestFormsItems,
+        ...approvedFormsItem,
+        { icon: FileText, label: 'Reports', path: '/reports' },
+        { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
+      ];
+    } else if (role === 'superadmin') {
+      // Everything
+      menuItems = [
+        ...baseItems,
+        ...superAdminItems,
+        ...requestFormsItems,
+        ...approvalsItems,
+        ...approvedFormsItem,
+        ...adminItems,
+        { icon: FileText, label: 'Reports', path: '/reports' },
+        { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
+      ];
+    }
+
+    return menuItems;
+  };
+
+  const menuItems = getMenuItems();
 
   const renderBadge = (label: string) => {
     let count = 0;
@@ -145,10 +200,10 @@ const Sidebar = ({ isOpen, onToggle }) => {
             </div>
           </div>
 
-          {/* User Info */}
+          {/* User Info - Updated to show full name */}
           {user && (
             <div className="px-6 py-3 border-b border-gray-200 bg-gray-50">
-              <div className="text-sm font-semibold text-gray-900">{user.username}</div>
+              <div className="text-sm font-semibold text-gray-900">{user.full_name || user.username}</div>
               <div className="text-xs text-gray-500 capitalize">{user.role}</div>
             </div>
           )}

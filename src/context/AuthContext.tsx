@@ -1,10 +1,12 @@
-// src/context/AuthContext.tsx
+// Updated AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { logoutUser } from '../api'; // Adjust import path as needed
 
 interface User {
   username: string;
   role: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
 }
 
 interface AuthContextType {
@@ -37,7 +39,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       try {
         // Decode JWT payload (client-side, not verified)
         const payload = JSON.parse(atob(token.split('.')[1]));
-        setUser({ username: payload.username, role: payload.role });
+        setUser({ 
+          username: payload.username, 
+          role: payload.role,
+          first_name: payload.first_name,
+          last_name: payload.last_name,
+          full_name: payload.full_name
+        });
       } catch (error) {
         console.error('Invalid token');
         setToken(null);
@@ -58,7 +66,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const currentToken = localStorage.getItem('token');
     try {
       if (currentToken) {
-        await logoutUser();
+        // Call logout API if needed
+        await fetch('/api/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${currentToken}`,
+            'Content-Type': 'application/json',
+          },
+        });
       }
     } catch (error) {
       console.error('Logout API error:', error);

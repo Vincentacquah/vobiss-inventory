@@ -22,7 +22,6 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <LowStockNotifier />
       <AuthProvider>
         <BrowserRouter>
           <Routes>
@@ -31,6 +30,7 @@ const App = () => (
               path="/*" 
               element={
                 <RequireAuth>
+                  <LowStockNotifier />
                   <Index />
                 </RequireAuth>
               } 

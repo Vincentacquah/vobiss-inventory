@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Search, XCircle, CheckCircle, AlertCircle } from 'lucide-react';
-import { getRequests, getRequestDetails, rejectRequest } from '../api';
+import { getRequests, getRequestDetails, rejectRequest, finalizeRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,16 +101,7 @@ const ApprovedForms: React.FC = () => {
   const handleFinalize = async (data: { items: { itemId: number; quantityReceived: number; quantityReturned: number }[]; releasedBy: string }) => {
     if (!selectedRequest) return;
     try {
-      const API_URL = 'http://localhost:3001/api';
-      const response = await fetch(`${API_URL}/requests/${selectedRequest.id}/finalize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: data.items, releasedBy: data.releasedBy }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to finalize request");
-      }
+      await finalizeRequest(selectedRequest.id, data.items, data.releasedBy);
       setIsFormOpen(false);
       setSelectedRequest(null);
       toast({
@@ -118,7 +109,7 @@ const ApprovedForms: React.FC = () => {
         description: "Request finalized successfully",
         variant: "default"
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error finalizing request:', error);
       toast({
         title: "Error",
