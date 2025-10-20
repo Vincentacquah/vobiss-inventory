@@ -5,7 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Edit, Save, X, Plus } from 'lucide-react';
+import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 
 interface RequestItem {
   id: number;
@@ -156,25 +156,60 @@ const RequestDetails: React.FC = () => {
     );
   };
 
+  const generateId = () => {
+    const digits = '0123456789';
+    let idStr = '';
+    // Position 0: random digit
+    idStr += digits[Math.floor(Math.random() * 10)];
+    // Position 1: V
+    idStr += 'V';
+    // Position 2: random digit
+    idStr += digits[Math.floor(Math.random() * 10)];
+    // Position 3: random digit
+    idStr += digits[Math.floor(Math.random() * 10)];
+    // Position 4: i
+    idStr += 'i';
+    // Position 5: random digit
+    idStr += digits[Math.floor(Math.random() * 10)];
+    // Position 6: random digit
+    idStr += digits[Math.floor(Math.random() * 10)];
+    // Position 7: N
+    idStr += 'N';
+    return idStr;
+  };
+
+  const handlePrint = () => {
+    const newId = generateId();
+    const printContent = document.getElementById('print-content');
+    if (printContent) {
+      const idElement = printContent.querySelector('#form-id');
+      if (idElement) {
+        idElement.textContent = newId;
+      }
+      const originalContent = document.body.innerHTML;
+      document.body.innerHTML = printContent.innerHTML;
+      window.print();
+      document.body.innerHTML = originalContent;
+      window.location.reload();
+    }
+  };
+
   if (loading) {
-    return (
-      <LoadingState />
-    );
+    return <LoadingState />;
   }
 
   if (!request) {
-    return (
-      <NotFoundState />
-    );
+    return <NotFoundState />;
   }
 
   const isEditable = request.status === 'pending';
   const statusConfig = getStatusConfig(request.status);
+  const statusText = request.status.charAt(0).toUpperCase() + request.status.slice(1);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
-        {/* Header */}
+        {/* Header - Screen Only */}
         <div className="mb-8 flex items-center justify-between">
           <Button
             variant="outline"
@@ -184,18 +219,29 @@ const RequestDetails: React.FC = () => {
             <ArrowLeft className="h-5 w-5 mr-2" />
             Back to List
           </Button>
-          <ActionButtons
-            isEditable={isEditable}
-            editing={editing}
-            onEdit={() => setEditing(true)}
-            onCancel={handleCancelEdit}
-            onSave={handleSaveEdit}
-          />
+          <div className="flex space-x-3">
+            <ActionButtons
+              isEditable={isEditable}
+              editing={editing}
+              onEdit={() => setEditing(true)}
+              onCancel={handleCancelEdit}
+              onSave={handleSaveEdit}
+            />
+            {request.status === 'completed' && (
+              <Button 
+                onClick={handlePrint} 
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Print
+              </Button>
+            )}
+          </div>
         </div>
 
-        {/* Main Card */}
-        <div className="bg-white rounded-lg shadow-md border border-gray-100 p-8">
-          {/* Logo and Title */}
+        {/* Screen View */}
+        <div className="bg-white rounded-lg shadow-md border border-gray-100 p-8" id="screen-content">
+          {/* Logo and Title - Screen */}
           <div className="text-center mb-8 pb-8 border-b border-gray-200">
             <img 
               src="/vobiss-logo.png" 
@@ -205,75 +251,116 @@ const RequestDetails: React.FC = () => {
             <h1 className="text-3xl font-bold text-gray-900">REQUEST FORM FOR MATERIALS</h1>
           </div>
 
-          {/* Title and Status */}
-          <div className="flex items-center justify-between mb-8">
-            <div></div>
-            <StatusBadge status={request.status} config={statusConfig} />
+          <div className="flex justify-end mb-8">
+            <StatusBadge status={statusText} config={statusConfig} />
           </div>
 
-          {/* Details Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-            <DetailField
-              label="Project Name"
-              value={editData.project_name}
-              editing={editing}
-              onChange={(val) => handleFieldChange('project_name', val)}
-            />
-            <DetailField
-              label="Created By"
-              value={request.created_by}
-              editing={false}
-            />
-            <DetailField
-              label="Team Leader Name"
-              value={editData.team_leader_name}
-              editing={editing}
-              onChange={(val) => handleFieldChange('team_leader_name', val)}
-            />
-            <DetailField
-              label="Team Leader Phone"
-              value={editData.team_leader_phone}
-              editing={editing}
-              onChange={(val) => handleFieldChange('team_leader_phone', val)}
-            />
-            <DetailField
-              label="ISP Name"
-              value={editData.isp_name || 'N/A'}
-              editing={editing}
-              onChange={(val) => handleFieldChange('isp_name', val)}
-            />
-            <DetailField
-              label="Location"
-              value={editData.location}
-              editing={editing}
-              onChange={(val) => handleFieldChange('location', val)}
-            />
-            <DeploymentTypeField
-              value={editData.deployment_type}
-              editing={editing}
-              onChange={(val) => handleFieldChange('deployment_type', val)}
-            />
-            <DetailField
-              label="Release By"
-              value={request.release_by || 'N/A'}
-              editing={false}
-            />
-            <DetailField
-              label="Received By"
-              value={request.received_by || 'N/A'}
-              editing={false}
-            />
-            <DateField
-              label="Created At"
-              value={request.created_at}
-            />
-            <DateField
-              label="Updated At"
-              value={request.updated_at}
-            />
-          </div>
+          {/* Project Information Section - Screen */}
+          <section className="mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b border-gray-200 pb-2">Project Information</h2>
+            <div className="bg-gray-50 rounded-lg p-6">
+              <div className="mb-6 italic text-gray-600 text-center border-b border-gray-200 pb-3">
+                <p className="text-lg">Requested by: <span className="font-semibold">{request.created_by}</span></p>
+              </div>
+              {editing ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  <DetailField
+                    label="Project Name"
+                    value={editData.project_name}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('project_name', val)}
+                  />
+                  <DetailField
+                    label="Team Leader Name"
+                    value={editData.team_leader_name}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('team_leader_name', val)}
+                  />
+                  <DetailField
+                    label="Team Leader Phone"
+                    value={editData.team_leader_phone}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('team_leader_phone', val)}
+                  />
+                  <DetailField
+                    label="ISP Name"
+                    value={editData.isp_name || 'N/A'}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('isp_name', val)}
+                  />
+                  <DetailField
+                    label="Location"
+                    value={editData.location}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('location', val)}
+                  />
+                  <DeploymentTypeField
+                    value={editData.deployment_type}
+                    editing={true}
+                    onChange={(val) => handleFieldChange('deployment_type', val)}
+                  />
+                  <DetailField
+                    label="Received By"
+                    value={request.received_by || 'N/A'}
+                    editing={false}
+                  />
+                  <DateField
+                    label="Created At"
+                    value={request.created_at}
+                  />
+                  <DateField
+                    label="Updated At"
+                    value={request.updated_at}
+                  />
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Name</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.project_name || 'N/A'}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Team Leader Name</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_name || 'N/A'}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Team Leader Phone</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_phone || 'N/A'}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">ISP Name</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.isp_name || 'N/A'}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Location</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.location || 'N/A'}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Deployment Type</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || 'N/A'}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Received By</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.received_by || 'N/A'}</td>
+                      </tr>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Created At</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.created_at).toLocaleString()}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Updated At</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.updated_at).toLocaleString()}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
 
-          {/* Items and Approvals */}
+          {/* Items and Approvals - Screen */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <ItemsTable
               items={editing ? selectedItems : request.items}
@@ -284,15 +371,211 @@ const RequestDetails: React.FC = () => {
               onAddRow={addItemRow}
               isEditable={isEditable}
             />
-            <ApprovalsSection approvals={request.approvals} />
+            <ApprovalsSection approvals={request.approvals} releaseBy={request.release_by} />
           </div>
         </div>
       </div>
+
+      {/* Print Content - Hidden on Screen */}
+      <div id="print-content" className="hidden">
+        <div className="p-1 max-w-4xl mx-auto bg-white">
+          {/* Header - Print */}
+          <header className="mb-2 border-b border-gray-500 pb-1 flex items-start justify-between">
+            <img 
+              src="/vobiss-logo.png" 
+              alt="VOBISS Logo" 
+              className="h-14"
+            />
+            <div className="flex-1 text-center mx-1">
+              <h1 className="text-xl font-bold uppercase tracking-wide text-gray-900">REQUEST FORM FOR MATERIALS</h1>
+            </div>
+            <div className="text-right bg-gray-50 border border-gray-300 rounded px-1 py-0.5">
+              <StatusBadgePrint status={statusText} config={statusConfig} />
+            </div>
+          </header>
+
+          {/* Section 1: Project Information - Table Layout */}
+          <section className="mb-2">
+            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Project Information</h2>
+            <div className="italic text-gray-600 mb-1 text-center border-b border-gray-200 pb-0.5 font-serif">
+              <p className="text-sm">Requested by: <span className="font-medium text-gray-900">{request.created_by}</span></p>
+            </div>
+            <div className="overflow-hidden rounded border border-gray-300">
+              <table className="w-full text-xs bg-white">
+                <tbody>
+                  <tr className="border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Name</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.project_name || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-gray-50 border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Team Leader Name</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_name || 'N/A'}</td>
+                  </tr>
+                  <tr className="border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Team Leader Phone</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_phone || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-gray-50 border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">ISP Name</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.isp_name || 'N/A'}</td>
+                  </tr>
+                  <tr className="border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Location</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.location || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-gray-50 border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Deployment Type</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || 'N/A'}</td>
+                  </tr>
+                  <tr className="border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Received By</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.received_by || 'N/A'}</td>
+                  </tr>
+                  <tr className="bg-gray-50 border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Created At</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.created_at).toLocaleString()}</td>
+                  </tr>
+                  <tr>
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Updated At</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.updated_at).toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <hr className="my-1 border-gray-300" />
+
+          {/* Section 2: Items Table */}
+          <section className="mb-2">
+            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Items</h2>
+            <div className="overflow-hidden rounded border border-gray-300">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Item Name</th>
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Requested</th>
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Received</th>
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Returned</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {request.items.map((item, index) => (
+                    <tr key={index}>
+                      <td className="border border-gray-300 px-3 py-1.5 font-medium text-gray-900 text-xs">{item.item_name}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_requested || 0}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || 'N/A'}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_returned || 'N/A'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Section 3: Approvals */}
+          <section className="mb-4">
+            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Approvals</h2>
+            <div className="border border-gray-300 rounded p-2 bg-gray-50 text-xs">
+              {request.release_by && (
+                <div className="mb-2 pb-1 border-b border-gray-200">
+                  <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Issuer:</span><span className="ml-1">{request.release_by}</span></div>
+                  <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(request.updated_at).toLocaleString()}</span></div>
+                </div>
+              )}
+              {request.approvals.length > 0 ? (
+                request.approvals.map((approval, index) => (
+                  <div key={approval.id} className={`pb-2 ${index < request.approvals.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
+                    <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1">{approval.approver_name}</span></div>
+                    <div className="flex mb-0.5 text-gray-700"><span className="w-16 font-medium">Signature:</span><span className="ml-1 italic">{approval.signature}</span></div>
+                    <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(approval.approved_at).toLocaleString()}</span></div>
+                  </div>
+                ))
+              ) : (
+                <p className="italic text-gray-500 text-center py-2 font-serif">No approvals recorded yet</p>
+              )}
+            </div>
+          </section>
+
+          {/* Form ID */}
+          <div className="mt-4 text-center italic text-xs text-gray-500 border-t border-gray-300 pt-1">
+            Form ID: <span id="form-id">TEMP</span>
+          </div>
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #print-content, #print-content * {
+            visibility: visible;
+          }
+          #print-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          #screen-content {
+            display: none !important;
+          }
+          .toast {
+            display: none !important;
+          }
+          @page {
+            size: A4 portrait;
+            margin: 0;
+            @top-left {
+              content: none;
+            }
+            @top-center {
+              content: none;
+            }
+            @top-right {
+              content: none;
+            }
+            @bottom-left {
+              content: none;
+            }
+            @bottom-center {
+              content: none;
+            }
+            @bottom-right {
+              content: none;
+            }
+            @left-middle {
+              content: none;
+            }
+            @right-middle {
+              content: none;
+            }
+          }
+          body {
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+            color-adjust: exact;
+          }
+          #print-content {
+            font-family: 'Times New Roman', serif;
+            line-height: 1.2;
+            font-size: 10pt;
+          }
+          table {
+            page-break-inside: avoid;
+          }
+          h1, h2 {
+            page-break-after: avoid;
+          }
+        }
+      `}</style>
     </div>
   );
 };
 
-/* Helper Components */
+/* Helper Components - Updated for Print */
 
 const LoadingState: React.FC = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -352,16 +635,17 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
 interface StatusConfig {
   bg: string;
   text: string;
+  border: string;
 }
 
 function getStatusConfig(status: string): StatusConfig {
   const configs: Record<string, StatusConfig> = {
-    pending: { bg: 'bg-yellow-100', text: 'text-yellow-800' },
-    approved: { bg: 'bg-blue-100', text: 'text-blue-800' },
-    completed: { bg: 'bg-green-100', text: 'text-green-800' },
-    rejected: { bg: 'bg-red-100', text: 'text-red-800' }
+    pending: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-300' },
+    approved: { bg: 'bg-blue-100', text: 'text-blue-800', border: 'border-blue-300' },
+    completed: { bg: 'bg-green-100', text: 'text-green-800', border: 'border-green-300' },
+    rejected: { bg: 'bg-red-100', text: 'text-red-800', border: 'border-red-300' }
   };
-  return configs[status] || { bg: 'bg-gray-100', text: 'text-gray-800' };
+  return configs[status] || { bg: 'bg-gray-100', text: 'text-gray-800', border: 'border-gray-300' };
 }
 
 interface StatusBadgeProps {
@@ -370,9 +654,15 @@ interface StatusBadgeProps {
 }
 
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status, config }) => (
-  <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium ${config.bg} ${config.text}`}>
-    {status.charAt(0).toUpperCase() + status.slice(1)}
+  <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium ${config.bg} ${config.text} border ${config.border}`}>
+    {status}
   </span>
+);
+
+const StatusBadgePrint: React.FC<StatusBadgeProps> = ({ status, config }) => (
+  <div className={`px-1 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text} border ${config.border} inline-block uppercase font-bold`}>
+    {status}
+  </div>
 );
 
 interface DetailFieldProps {
@@ -563,10 +853,10 @@ const ItemRow: React.FC<ItemRowProps> = ({
       </>
     ) : (
       <>
-        <td className="px-4 py-3 text-sm font-medium text-gray-800">{item.item_name}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_requested || 0}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || 'N/A'}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_returned || 'N/A'}</td>
+        <td className="px-4 py-3 text-sm font-medium text-gray-800">{item.item_name || item.name}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_requested || item.requested || 0}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || 'N/A'}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_returned || item.returned || 'N/A'}</td>
       </>
     )}
   </tr>
@@ -574,12 +864,18 @@ const ItemRow: React.FC<ItemRowProps> = ({
 
 interface ApprovalsSectionProps {
   approvals: any[];
+  releaseBy?: string | null;
 }
 
-const ApprovalsSection: React.FC<ApprovalsSectionProps> = ({ approvals }) => (
+const ApprovalsSection: React.FC<ApprovalsSectionProps> = ({ approvals, releaseBy }) => (
   <div>
     <h2 className="text-lg font-semibold text-gray-800 mb-4">Approvals</h2>
     <div className="bg-gray-50 rounded-lg shadow-sm border border-gray-100 p-4">
+      {releaseBy && (
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <p className="text-sm font-medium text-gray-800">Issuer: {releaseBy}</p>
+        </div>
+      )}
       {approvals.length > 0 ? (
         approvals.map((approval) => (
           <div key={approval.id} className="border-l-4 border-blue-500 pl-4 py-2 mb-3">
