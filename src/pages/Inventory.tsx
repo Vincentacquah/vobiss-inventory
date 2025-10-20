@@ -1,3 +1,4 @@
+// Updated Inventory.tsx
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, Package, Grid, List, AlertTriangle, DollarSign, Image, Info, ChevronDown, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as api from '../api';
@@ -126,6 +127,11 @@ const Inventory = () => {
    */
   const handleSaveItem = async (itemData, receiptFile = null, itemId = null) => {
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No access token found. Please log in.');
+      }
+
       const formData = new FormData();
       formData.append('name', itemData.name);
       formData.append('description', itemData.description || '');
@@ -140,6 +146,9 @@ const Inventory = () => {
       const method = itemId ? 'PUT' : 'POST';
       const response = await fetch(url, {
         method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         body: formData,
       });
       if (!response.ok) {

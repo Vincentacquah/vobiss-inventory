@@ -68,6 +68,7 @@ interface ItemOut {
 interface Request {
   id: number;
   created_by: string;
+  team_leader_name: string;
   team_leader_phone: string;
   project_name: string;
   isp_name: string;
@@ -90,6 +91,7 @@ interface RequestDetails extends Request {
     quantity_received: number | null;
     quantity_returned: number | null;
     item_name: string;
+    current_stock: number;
   }[];
   approvals: {
     id: number;

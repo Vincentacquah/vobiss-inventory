@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Search, XCircle, CheckCircle, AlertCircle } from 'lucide-react';
-import { getRequests, getRequestDetails, rejectRequest, finalizeRequest } from '../api';
+import { Search, XCircle, CheckCircle, AlertCircle, UserCheck } from 'lucide-react';
+import { getRequests, getRequestDetails, rejectRequest, finalizeRequest, approveRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 interface Request {
   id: number;
@@ -46,14 +47,20 @@ interface RequestDetails extends Request {
 }
 
 const ApprovedForms: React.FC = () => {
+  const { user } = useAuth();
+  const canManageRequests = user?.role === 'superadmin' || user?.role === 'issuer' || user?.role === 'approver';
+  const canFinalize = user?.role === 'superadmin' || user?.role === 'issuer';
   const [allRequests, setAllRequests] = useState<Request[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<Request[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'approved' | 'completed' | 'rejected'>('approved');
+  const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'completed' | 'rejected'>('approved');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isRejectOpen, setIsRejectOpen] = useState(false);
+  const [isApproveOpen, setIsApproveOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RequestDetails | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
+  const [approverName, setApproverName] = useState('');
+  const [signature, setSignature] = useState('');
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
@@ -62,12 +69,15 @@ const ApprovedForms: React.FC = () => {
       try {
         setLoading(true);
         const data = await getRequests();
-        setAllRequests(data.filter(request => ['approved', 'completed', 'rejected'].includes(request.status)) || []);
+        const filteredData = canManageRequests 
+          ? data 
+          : data.filter(request => ['approved', 'completed', 'rejected'].includes(request.status));
+        setAllRequests(filteredData);
       } catch (error) {
         console.error('Error loading requests:', error);
         toast({
           title: "Error",
-          description: "Failed to load approved requests",
+          description: "Failed to load requests",
           variant: "destructive"
         });
       } finally {
@@ -76,10 +86,10 @@ const ApprovedForms: React.FC = () => {
     };
 
     loadRequests();
-    const interval = setInterval(loadRequests, 30000); // Increased to 30 seconds to reduce shaking
+    const interval = setInterval(loadRequests, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [canManageRequests]);
 
   useEffect(() => {
     filterRequests();
@@ -100,6 +110,16 @@ const ApprovedForms: React.FC = () => {
 
   const handleFinalize = async (data: { items: { itemId: number; quantityReceived: number; quantityReturned: number }[]; releasedBy: string }) => {
     if (!selectedRequest) return;
+
+    if (!canFinalize) {
+      toast({
+        title: "Access Denied",
+        description: "Super Admin or Issuer access required to finalize requests",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       await finalizeRequest(selectedRequest.id, data.items, data.releasedBy);
       setIsFormOpen(false);
@@ -119,6 +139,28 @@ const ApprovedForms: React.FC = () => {
     }
   };
 
+  const handleApprove = async () => {
+    if (!selectedRequestId || !approverName || !signature) return;
+    try {
+      await approveRequest(selectedRequestId, { approverName, signature });
+      setIsApproveOpen(false);
+      setApproverName('');
+      setSignature('');
+      toast({
+        title: "Success",
+        description: "Request approved successfully",
+        variant: "default"
+      });
+    } catch (error: any) {
+      console.error('Error approving request:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve request",
+        variant: "destructive"
+      });
+    }
+  };
+
   const handleReject = async () => {
     if (!selectedRequestId) return;
     try {
@@ -129,7 +171,7 @@ const ApprovedForms: React.FC = () => {
         description: "Request rejected",
         variant: "default"
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error rejecting request:', error);
       toast({
         title: "Error",
@@ -140,6 +182,15 @@ const ApprovedForms: React.FC = () => {
   };
 
   const openFinalizeForm = async (requestId: number) => {
+    if (!canFinalize) {
+      toast({
+        title: "Access Denied",
+        description: "Super Admin or Issuer access required to finalize requests",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       const details = await getRequestDetails(requestId);
       setSelectedRequest(details);
@@ -154,8 +205,14 @@ const ApprovedForms: React.FC = () => {
     }
   };
 
+  const openApproveForm = async (requestId: number) => {
+    setSelectedRequestId(requestId);
+    setIsApproveOpen(true);
+  };
+
   const statusIcon = (status: string) => {
     switch (status) {
+      case 'pending': return <UserCheck className="h-4 w-4" />;
       case 'approved': return <CheckCircle className="h-4 w-4" />;
       case 'completed': return <CheckCircle className="h-4 w-4" />;
       case 'rejected': return <XCircle className="h-4 w-4" />;
@@ -165,6 +222,7 @@ const ApprovedForms: React.FC = () => {
 
   const statusColor = (status: string) => {
     switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800';
       case 'approved': return 'bg-blue-100 text-blue-800';
       case 'completed': return 'bg-green-100 text-green-800';
       case 'rejected': return 'bg-red-100 text-red-800';
@@ -172,11 +230,22 @@ const ApprovedForms: React.FC = () => {
     }
   };
 
+  const tabs = canManageRequests ? 
+    ['pending', 'approved', 'completed', 'rejected'] : 
+    ['approved', 'completed', 'rejected'];
+
+  const tabCounts = {
+    pending: allRequests.filter(r => r.status === 'pending').length,
+    approved: allRequests.filter(r => r.status === 'approved').length,
+    completed: allRequests.filter(r => r.status === 'completed').length,
+    rejected: allRequests.filter(r => r.status === 'rejected').length,
+  };
+
   if (loading) {
     return (
       <div className="text-center py-12">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Loading approved requests...</p>
+        <p className="text-gray-600">Loading requests...</p>
       </div>
     );
   }
@@ -185,8 +254,8 @@ const ApprovedForms: React.FC = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Final Review History</h1>
-          <p className="text-gray-600 mt-1">Manage approved requests with full logs</p>
+          <h1 className="text-3xl font-bold text-gray-900">Request Management</h1>
+          <p className="text-gray-600 mt-1">{canManageRequests ? 'Review and approve pending requests' : 'Manage approved requests with full logs'}</p>
         </div>
       </div>
 
@@ -206,10 +275,21 @@ const ApprovedForms: React.FC = () => {
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-gray-50 rounded-xl p-1">
-          <TabsTrigger value="approved" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">Approved ({allRequests.filter(r => r.status === 'approved').length})</TabsTrigger>
-          <TabsTrigger value="completed" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">Completed ({allRequests.filter(r => r.status === 'completed').length})</TabsTrigger>
-          <TabsTrigger value="rejected" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">Rejected ({allRequests.filter(r => r.status === 'rejected').length})</TabsTrigger>
+        <TabsList className={`grid ${canManageRequests ? 'grid-cols-4' : 'grid-cols-3'} w-full bg-gray-50 rounded-xl p-1`}>
+          {canManageRequests && (
+            <TabsTrigger value="pending" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">
+              Pending ({tabCounts.pending})
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="approved" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">
+            Approved ({tabCounts.approved})
+          </TabsTrigger>
+          <TabsTrigger value="completed" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">
+            Completed ({tabCounts.completed})
+          </TabsTrigger>
+          <TabsTrigger value="rejected" className="data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">
+            Rejected ({tabCounts.rejected})
+          </TabsTrigger>
         </TabsList>
         <TabsContent value={activeTab} className="mt-6">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -223,7 +303,7 @@ const ApprovedForms: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deployment Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approved At</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
@@ -252,7 +332,7 @@ const ApprovedForms: React.FC = () => {
                         <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm text-gray-900">{new Date(request.updated_at).toLocaleDateString()}</div>
+                        <div className="text-sm text-gray-900">{new Date(request.created_at).toLocaleDateString()}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
@@ -265,14 +345,14 @@ const ApprovedForms: React.FC = () => {
                           <Link to={`/request-forms/${request.id}`} className="text-indigo-600 hover:text-indigo-500 text-sm font-medium">
                             View
                           </Link>
-                          {request.status === 'approved' && (
+                          {request.status === 'pending' && canManageRequests && (
                             <>
                               <Button
-                                onClick={() => openFinalizeForm(request.id)}
+                                onClick={() => openApproveForm(request.id)}
                                 size="sm"
-                                className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
+                                className="bg-blue-600 text-white hover:bg-blue-700 rounded-lg"
                               >
-                                Finalize
+                                Approve
                               </Button>
                               <Button
                                 onClick={() => {
@@ -285,6 +365,32 @@ const ApprovedForms: React.FC = () => {
                               >
                                 Reject
                               </Button>
+                            </>
+                          )}
+                          {request.status === 'approved' && (
+                            <>
+                              {canFinalize && (
+                                <Button
+                                  onClick={() => openFinalizeForm(request.id)}
+                                  size="sm"
+                                  className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
+                                >
+                                  Finalize
+                                </Button>
+                              )}
+                              {canManageRequests && (
+                                <Button
+                                  onClick={() => {
+                                    setSelectedRequestId(request.id);
+                                    setIsRejectOpen(true);
+                                  }}
+                                  variant="destructive"
+                                  size="sm"
+                                  className="rounded-lg"
+                                >
+                                  Reject
+                                </Button>
+                              )}
                             </>
                           )}
                         </div>
@@ -321,6 +427,46 @@ const ApprovedForms: React.FC = () => {
         </div>
       )}
 
+      {isApproveOpen && (
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
+          <div className="text-center mb-6">
+            <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900">APPROVE REQUEST</h2>
+            <p className="text-gray-600">Provide your approval details</p>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Approver Name *</label>
+              <Input
+                value={approverName}
+                onChange={(e) => setApproverName(e.target.value)}
+                placeholder="Enter your full name"
+                className="w-full border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-lg px-4 py-3"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Signature/Notes *</label>
+              <Input
+                value={signature}
+                onChange={(e) => setSignature(e.target.value)}
+                placeholder="Enter signature or approval notes"
+                className="w-full border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-lg px-4 py-3"
+              />
+            </div>
+            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+              <Button variant="outline" onClick={() => setIsApproveOpen(false)} className="border-gray-300 rounded-lg">Cancel</Button>
+              <Button 
+                onClick={handleApprove}
+                disabled={!approverName.trim() || !signature.trim()}
+                className="bg-blue-600 text-white hover:bg-blue-700 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Approve Request
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isRejectOpen && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
           <div className="text-center mb-6">
@@ -347,7 +493,7 @@ interface FinalizeFormProps {
 }
 
 const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }) => {
-  const [items, setItems] = useState(request.items.map(item => ({
+  const [items, setItems] = useState(request.items.map((item, index) => ({
     itemId: item.item_id,
     quantityReceived: item.quantity_received || item.quantity_requested || 0,
     quantityReturned: item.quantity_returned || 0,
@@ -362,8 +508,8 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
 
     request.items.forEach((item, index) => {
       const received = items[index]?.quantityReceived || 0;
-      if (received > item.current_stock) {
-        newErrors[index] = `Received quantity cannot exceed available stock (${item.current_stock}).`;
+      if (received > (item.current_stock || 0)) {
+        newErrors[index] = `Received quantity cannot exceed available stock (${item.current_stock || 0}).`;
         hasErrors = true;
       }
       if (received < 0 || (items[index]?.quantityReturned || 0) < 0) {
@@ -376,7 +522,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
     return !hasErrors;
   };
 
-  const handleItemChange = (index: number, field: string, value: number) => {
+  const handleItemChange = (index: number, field: 'quantityReceived' | 'quantityReturned', value: number) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
@@ -511,9 +657,9 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
             const received = items[index]?.quantityReceived || 0;
             const returned = items[index]?.quantityReturned || 0;
             const itemError = errors[index];
-            const isOverStock = received > item.current_stock;
+            const isOverStock = received > (item.current_stock || 0);
             return (
-              <div key={index} className={`p-4 rounded-lg border shadow-sm transition-all ${
+              <div key={item.id} className={`p-4 rounded-lg border shadow-sm transition-all ${
                 itemError ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white'
               }`}>
                 <div className="flex items-center justify-between mb-3">
@@ -521,7 +667,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
                   <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">Requested: {item.quantity_requested}</span>
                 </div>
                 <div className="mb-3 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
-                  <strong>Available Stock (from DB):</strong> <span className="font-mono bg-white px-2 py-1 rounded text-green-800">{item.current_stock}</span>
+                  <strong>Available Stock (from DB):</strong> <span className="font-mono bg-white px-2 py-1 rounded text-green-800">{item.current_stock || 0}</span>
                   {isOverStock && (
                     <div className="mt-1 flex items-center text-red-600 text-xs">
                       <AlertCircle className="h-3 w-3 mr-1" />

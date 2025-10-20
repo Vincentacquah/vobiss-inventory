@@ -85,6 +85,21 @@ const requireSuperAdmin = (req, res, next) => {
   next();
 };
 
+const requireSuperAdminOrIssuer = (req, res, next) => {
+  if (req.user.role !== 'superadmin' && req.user.role !== 'issuer') {
+    return res.status(403).json({ error: 'Super Admin or Issuer access required' });
+  }
+  next();
+};
+
+const requireManager = (req, res, next) => {
+  const allowedRoles = ['superadmin', 'issuer', 'approver'];
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ error: 'Manager access required' });
+  }
+  next();
+};
+
 // Seed default user and init DB
 async function seedDefaultUser() {
   try {
@@ -520,7 +535,7 @@ app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/requests/:id/reject', authenticateToken, requireSuperAdmin, async (req, res) => {
+app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (req, res) => {
   try {
     const result = await rejectRequest(req.params.id);
     res.json(result);
@@ -540,7 +555,7 @@ app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdmin, async (req, res) => {
+app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdminOrIssuer, async (req, res) => {
   try {
     const { items, releasedBy } = req.body;
     const result = await finalizeRequest(req.params.id, items, releasedBy);
