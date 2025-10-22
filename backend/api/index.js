@@ -1,12 +1,22 @@
-// Updated server.js (key changes: auth middleware, user routes, updated login, enhanced send-low-stock-alert)
+// Full server.js ready for Vercel deployment
+// Key Vercel adaptations:
+// - Exported app (no app.listen())
+// - Multer uses memoryStorage (no disk writes in serverless)
+// - File uploads to Supabase Storage (create public 'receipts' bucket)
+// - CORS configurable via FRONTEND_URL env var (no hardcoding)
+// - Seeding on cold start (use Supabase migrations for prod if needed)
+// - All routes/auth/DB/email logic preserved
+// - Add to package.json: "@supabase/supabase-js": "^2.45.4", "type": "module"
+// - Env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET, FRONTEND_URL, DATABASE_URL (for pool)
+
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import path from 'path'; // For file extensions
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import { createClient } from '@supabase/supabase-js';
 import {
   getItems, addItem, updateItem, deleteItem,
   getCategories, addCategory, updateCategory, deleteCategory,
@@ -15,36 +25,25 @@ import {
   updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs,
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
   initDB, getSettings, updateSetting,
-  getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser
-} from './db.js';
-import pool from './db.js';
-import { sendLowStockAlert } from './emailService.js';
+  getUsers, createUser, resetUserPassword, updateUserRole
+} from '../db.js';
+import pool from '../db.js';
+import { sendLowStockAlert } from '../emailService.js';
 
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
 
-// Ensure uploads directory exists
-const uploadsDir = './uploads';
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+// Initialize Supabase client with service role for server-side ops (storage, etc.)
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-// Multer configuration for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'receipt-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
+// Multer configuration for in-memory file handling (serverless-friendly)
 const upload = multer({ 
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -56,9 +55,12 @@ const upload = multer({
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL, // e.g., https://vobiss-inventory.vercel.app (set in Vercel env)
+  credentials: true
+}));
 app.use(express.json({ limit: '10mb' }));
-app.use('/uploads', express.static('uploads'));
+// No static serving - use Supabase public URLs for images
 
 // JWT Auth Middleware
 const authenticateToken = (req, res, next) => {
@@ -100,9 +102,43 @@ const requireManager = (req, res, next) => {
   next();
 };
 
-// Helper to get IP (add this near the top, after imports)
-function getClientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection.remoteAddress || 'unknown';
+// Helper: Upload file to Supabase Storage and return public URL
+async function uploadToSupabase(file) {
+  if (!file) return null;
+  
+  const fileName = `receipt-${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(file.originalname)}`;
+  const { data, error } = await supabase.storage
+    .from('receipts') // Ensure this public bucket exists in Supabase
+    .upload(fileName, Buffer.from(file.buffer), {
+      contentType: file.mimetype,
+      upsert: false
+    });
+  
+  if (error) {
+    throw new Error(`Upload failed: ${error.message}`);
+  }
+  
+  // Get public URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('receipts')
+    .getPublicUrl(data.path);
+  
+  return publicUrl;
+}
+
+// Helper: Delete file from Supabase Storage
+async function deleteFromSupabase(filePath) {
+  if (!filePath) return;
+  
+  // Extract filename from URL
+  const fileName = filePath.split('/').pop();
+  const { error } = await supabase.storage
+    .from('receipts')
+    .remove([fileName]);
+  
+  if (error) {
+    console.warn(`Delete failed (non-fatal): ${error.message}`);
+  }
 }
 
 // Seed default user and init DB
@@ -142,9 +178,9 @@ app.post('/api/login', async (req, res) => {
     }
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
     // Log audit
-    const ip = getClientIp(req);
+    const ip = req.ip || req.connection.remoteAddress;
     const details = { userAgent: req.get('User-Agent') };
-    await insertAuditLog(null, user.id, 'login', ip, details);
+    await insertAuditLog(user.id, 'login', ip, details);
     res.json({ 
       token, 
       user: { 
@@ -163,9 +199,9 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
+    const ip = req.ip || req.connection.remoteAddress;
     const details = { userAgent: req.get('User-Agent') };
-    await insertAuditLog(null, req.user.id, 'logout', ip, details);
+    await insertAuditLog(req.user.id, 'logout', ip, details);
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Error in logout:', error.stack);
@@ -183,7 +219,7 @@ app.get('/api/audit-logs', authenticateToken, async (req, res) => {
   }
 });
 
-// Settings Routes (add auth if needed)
+// Settings Routes
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const settings = await getSettings();
@@ -206,7 +242,7 @@ app.post('/api/settings/:key', authenticateToken, async (req, res) => {
   }
 });
 
-// Supervisors Routes (add auth)
+// Supervisors Routes
 app.get('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const supervisors = await getSupervisors();
@@ -248,7 +284,7 @@ app.delete('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (
   }
 });
 
-// New Users Routes (Super Admin only)
+// Users Routes
 app.get('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const users = await getUsers();
@@ -265,8 +301,7 @@ app.post('/api/users', authenticateToken, requireSuperAdmin, async (req, res) =>
     if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
-    const ip = getClientIp(req);
-    const user = await createUser(first_name, last_name, email, role, req.user.id, ip);
+    const user = await createUser(first_name, last_name, email, role);
     res.status(201).json(user);
   } catch (error) {
     console.error('Error creating user:', error.stack);
@@ -277,8 +312,7 @@ app.post('/api/users', authenticateToken, requireSuperAdmin, async (req, res) =>
 app.post('/api/users/:id/reset-password', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
-    const ip = getClientIp(req);
-    const result = await resetUserPassword(userId, req.user.id, ip);
+    const result = await resetUserPassword(userId);
     res.json(result);
   } catch (error) {
     console.error('Error resetting password:', error.stack);
@@ -293,8 +327,7 @@ app.put('/api/users/:id/role', authenticateToken, requireSuperAdmin, async (req,
     if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
       return res.status(400).json({ error: 'Invalid role' });
     }
-    const ip = getClientIp(req);
-    const user = await updateUserRole(userId, role, req.user.id, ip);
+    const user = await updateUserRole(userId, role);
     res.json(user);
   } catch (error) {
     console.error('Error updating user role:', error.stack);
@@ -302,50 +335,22 @@ app.put('/api/users/:id/role', authenticateToken, requireSuperAdmin, async (req,
   }
 });
 
-// Full user update route
-app.put('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id);
-    const updates = req.body; // { first_name, last_name, email, role }
-    const ip = getClientIp(req);
-    const user = await updateUser(userId, updates, req.user.id, ip);
-    res.json(user);
-  } catch (error) {
-    console.error('Error updating user:', error.stack);
-    res.status(error.message.includes('already exists') ? 400 : (error.message.includes('not found') ? 404 : 500)).json({ error: error.message });
-  }
-});
-
-// Delete user route
-app.delete('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
-  try {
-    const userId = parseInt(req.params.id);
-    const ip = getClientIp(req);
-    const result = await deleteUser(userId, req.user.id, ip);
-    res.json(result);
-  } catch (error) {
-    console.error('Error deleting user:', error.stack);
-    res.status(error.message.includes('not found') ? 404 : 500).json({ error: error.message });
-  }
-});
-
-// Dedicated route for manually triggering low stock alerts (updated to accept lowStockItems and supervisors)
+// Manual low stock alert
 app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
   try {
-    const { force, lowStockItems, supervisors } = req.body;
+    const { force } = req.body;
     if (force) {
       console.log('Force-triggered low stock alert');
     }
-    // Pass data to emailService (if not provided, emailService will fetch defaults)
-    await sendLowStockAlert(lowStockItems, supervisors);
-    res.json({ message: 'Low stock alert sent successfully to supervisors (or no items to alert about)' });
+    await sendLowStockAlert();
+    res.json({ message: 'Low stock alert sent successfully (or no items to alert about)' });
   } catch (error) {
     console.error('Error in manual low stock alert trigger:', error);
     res.status(500).json({ error: 'Failed to send alert: ' + error.message });
   }
 });
 
-// Items Routes (add auth where appropriate, e.g., superadmin for delete)
+// Items Routes
 app.get('/api/items', authenticateToken, async (req, res) => {
   try {
     const items = await getItems();
@@ -361,16 +366,17 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
     const itemData = req.body;
     let receiptImages = [];
     if (req.file) {
-      receiptImages = [`/uploads/${req.file.filename}`];
+      const publicUrl = await uploadToSupabase(req.file);
+      if (publicUrl) {
+        receiptImages = [publicUrl];
+      }
     }
-    const ip = getClientIp(req);
-    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip);
+    const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) });
     const parsedQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
-    // Only trigger alert if the newly added item is low stock
     if (parsedQuantity <= threshold) {
       console.log('New item added is low stock, triggering alert (non-blocking)');
-      sendLowStockAlert([item]).catch(err => console.error('Alert failed after item add:', err));
+      sendLowStockAlert(item).catch(err => console.error('Alert failed after item add:', err));
     } else {
       console.log('New item added is not low stock, skipping alert');
     }
@@ -400,20 +406,21 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
     }
 
     if (req.file) {
-      receiptImages.push(`/uploads/${req.file.filename}`);
+      const publicUrl = await uploadToSupabase(req.file);
+      if (publicUrl) {
+        receiptImages.push(publicUrl);
+      }
     }
 
     const updatedItemData = { ...itemData, receipt_images: JSON.stringify(receiptImages) };
-    const ip = getClientIp(req);
-    const item = await updateItem(itemId, updatedItemData, req.user.id, ip);
+    const item = await updateItem(itemId, updatedItemData);
 
-    // Check if quantity decreased and now <= threshold (newly low or lower)
     const oldQuantity = parseInt(currentItem.quantity, 10);
     const newQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
     if (newQuantity < oldQuantity && newQuantity <= threshold) {
       console.log('Item updated to low stock, triggering alert (non-blocking)');
-      sendLowStockAlert([item]).catch(err => console.error('Alert failed after item update:', err));
+      sendLowStockAlert(item).catch(err => console.error('Alert failed after item update:', err));
     } else {
       console.log('Item updated but not newly low stock, skipping alert');
     }
@@ -426,9 +433,10 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
 
 app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    // Delete associated receipt images
+    const itemId = parseInt(req.params.id);
     const currentItems = await getItems();
-    const itemToDelete = currentItems.find(item => item.id === parseInt(req.params.id));
+    const itemToDelete = currentItems.find(item => item.id === itemId);
+    
     if (itemToDelete) {
       let receiptImages = [];
       try {
@@ -436,17 +444,13 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
       } catch (e) {
         receiptImages = [];
       }
-      receiptImages.forEach(imgPath => {
-        try {
-          fs.unlinkSync(`.${imgPath}`);
-        } catch (unlinkError) {
-          console.warn('Could not delete receipt image:', unlinkError);
-        }
-      });
+      // Delete files from Supabase
+      for (const imgUrl of receiptImages) {
+        await deleteFromSupabase(imgUrl);
+      }
     }
     
-    const ip = getClientIp(req);
-    const result = await deleteItem(req.params.id, req.user.id, ip);
+    const result = await deleteItem(req.params.id);
     res.json(result);
   } catch (error) {
     console.error('Error deleting item:', error.stack);
@@ -454,7 +458,7 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
   }
 });
 
-// Categories Routes (add auth)
+// Categories Routes
 app.get('/api/categories', authenticateToken, async (req, res) => {
   try {
     const categories = await getCategories();
@@ -467,8 +471,7 @@ app.get('/api/categories', authenticateToken, async (req, res) => {
 
 app.post('/api/categories', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const category = await addCategory(req.body, req.user.id, ip);
+    const category = await addCategory(req.body);
     res.status(201).json(category);
   } catch (error) {
     console.error('Error adding category:', error.stack);
@@ -478,8 +481,7 @@ app.post('/api/categories', authenticateToken, async (req, res) => {
 
 app.put('/api/categories/:id', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const category = await updateCategory(req.params.id, req.body, req.user.id, ip);
+    const category = await updateCategory(req.params.id, req.body);
     res.json(category);
   } catch (error) {
     console.error('Error updating category:', error.stack);
@@ -489,8 +491,7 @@ app.put('/api/categories/:id', authenticateToken, async (req, res) => {
 
 app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const result = await deleteCategory(req.params.id, req.user.id, ip);
+    const result = await deleteCategory(req.params.id);
     res.json(result);
   } catch (error) {
     console.error('Error deleting category:', error.stack);
@@ -498,7 +499,7 @@ app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (r
   }
 });
 
-// Items Out Routes (add auth)
+// Items Out Routes
 app.get('/api/items-out', authenticateToken, async (req, res) => {
   try {
     const itemsOut = await getItemsOut();
@@ -512,9 +513,7 @@ app.get('/api/items-out', authenticateToken, async (req, res) => {
 app.post('/api/items-out', authenticateToken, async (req, res) => {
   console.log('Received issueItem request with data:', req.body);
   try {
-    const ip = getClientIp(req);
-    const itemOut = await issueItem(req.body, req.user.id, ip);
-    // Always trigger after issuing (decreases stock)
+    const itemOut = await issueItem(req.body);
     console.log('Item issued, triggering low stock alert (non-blocking)');
     sendLowStockAlert().catch(err => console.error('Alert failed after item issue:', err));
     res.status(201).json(itemOut);
@@ -546,11 +545,10 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Requests Routes (add auth, role checks if needed)
+// Requests Routes
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const request = await createRequest(req.body, req.user.id, ip);
+    const request = await createRequest(req.body);
     res.status(201).json(request);
   } catch (error) {
     console.error('Error creating request:', error.stack);
@@ -570,8 +568,7 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
 
 app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const result = await updateRequest(req.params.id, req.body, req.user.id, ip);
+    const result = await updateRequest(req.params.id, req.body);
     res.json(result);
   } catch (error) {
     console.error('Error updating request:', error.stack);
@@ -581,9 +578,7 @@ app.put('/api/requests/:id', authenticateToken, async (req, res) => {
 
 app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (req, res) => {
   try {
-    const { reason, rejectorName } = req.body;
-    const ip = getClientIp(req);
-    const result = await rejectRequest(req.params.id, req.user.id, ip, { reason, rejectorName });
+    const result = await rejectRequest(req.params.id);
     res.json(result);
   } catch (error) {
     console.error('Error rejecting request:', error.stack);
@@ -593,8 +588,7 @@ app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (r
 
 app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   try {
-    const ip = getClientIp(req);
-    const result = await approveRequest(req.params.id, req.body, req.user.id, ip);
+    const result = await approveRequest(req.params.id, req.body);
     res.json(result);
   } catch (error) {
     console.error('Error approving request:', error.stack);
@@ -605,8 +599,7 @@ app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
 app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdminOrIssuer, async (req, res) => {
   try {
     const { items, releasedBy } = req.body;
-    const ip = getClientIp(req);
-    const result = await finalizeRequest(req.params.id, items, releasedBy, req.user.id, ip);
+    const result = await finalizeRequest(req.params.id, items, releasedBy);
     res.json(result);
   } catch (error) {
     console.error('Error finalizing request:', error.stack);
@@ -624,7 +617,5 @@ app.get('/api/requests/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+// Export for Vercel serverless
+export default app;

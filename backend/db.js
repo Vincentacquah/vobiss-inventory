@@ -1,4 +1,4 @@
-// Updated db.js
+// Updated db.js with enhanced error handling for graceful table creation
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -47,10 +47,28 @@ async function generateUniqueUsername(lastName) {
   }
 }
 
-// Initialize database tables
+// Enhanced table creation with graceful error handling
+async function createTableIfNotExists(query, tableName) {
+  try {
+    await pool.query(query);
+    console.log(`Table "${tableName}" created or already exists.`);
+  } catch (error) {
+    const code = error && error.code ? error.code : null;
+    const message = error && error.message ? error.message : String(error);
+    if (code === '42P07' || (message && message.includes('already exists'))) {
+      console.log(`Table "${tableName}" already exists - skipping creation.`);
+    } else {
+      console.error(`Error creating table "${tableName}":`, message);
+      throw error; // Re-throw non-idempotent errors
+    }
+  }
+}
+
+// Initialize database tables with enhanced error handling
 export async function initDB() {
   try {
-    await pool.query(`
+    // Users table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         first_name VARCHAR(255) NOT NULL,
@@ -61,9 +79,9 @@ export async function initDB() {
         role VARCHAR(50) DEFAULT 'requester' CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `, 'users');
 
-    // Add new columns if they don't exist (migration)
+    // Add/migrate columns for users if needed
     try {
       await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255) NOT NULL DEFAULT '';`);
       await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT '';`);
@@ -71,23 +89,28 @@ export async function initDB() {
       await pool.query(`ALTER TABLE users ALTER COLUMN first_name DROP DEFAULT;`);
       await pool.query(`ALTER TABLE users ALTER COLUMN last_name DROP DEFAULT;`);
       await pool.query(`ALTER TABLE users ALTER COLUMN email DROP DEFAULT;`);
-      await pool.query(`ALTER TABLE users ADD CONSTRAINT check_role CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin'));`);
+      await pool.query(`ALTER TABLE users ADD CONSTRAINT IF NOT EXISTS check_role CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin'));`);
+      console.log('Users table migration completed successfully.');
     } catch (alterError) {
       if (!alterError.message.includes('already exists') && !alterError.message.includes('already have')) {
-        console.warn('Warning during user schema migration:', alterError.message);
+        console.warn('Warning during users schema migration:', alterError.message);
+      } else {
+        console.log('Users migration skipped (already applied).');
       }
     }
 
-    // Other tables remain the same...
-    await pool.query(`
+    // Supervisors table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS supervisors (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'supervisors');
+
+    // Settings table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS settings (
         id SERIAL PRIMARY KEY,
         key_name VARCHAR(255) UNIQUE NOT NULL,
@@ -95,8 +118,10 @@ export async function initDB() {
         description TEXT,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'settings');
+
+    // Audit logs table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS audit_logs (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
@@ -105,8 +130,10 @@ export async function initDB() {
         details JSONB,
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'audit_logs');
+
+    // Categories table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS categories (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -114,16 +141,20 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'categories');
+
+    // Vendors table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS vendors (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         contact_info TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'vendors');
+
+    // Items table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS items (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -139,21 +170,24 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
-    `);
+    `, 'items');
 
-    // Add vendor_id column to items if it doesn't exist (for schema migrations)
+    // Migrate vendor_id if needed
     try {
       await pool.query(`
         ALTER TABLE items ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id);
       `);
+      console.log('Items vendor_id migration completed.');
     } catch (alterError) {
-      // Ignore if column already exists or other non-critical errors
       if (!alterError.message.includes('already exists')) {
-        console.warn('Warning during schema migration:', alterError.message);
+        console.warn('Warning during items schema migration:', alterError.message);
+      } else {
+        console.log('Items migration skipped (already applied).');
       }
     }
 
-    await pool.query(`
+    // Items out table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS items_out (
         id SERIAL PRIMARY KEY,
         person_name VARCHAR(255) NOT NULL,
@@ -161,8 +195,10 @@ export async function initDB() {
         quantity INTEGER NOT NULL,
         date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'items_out');
+
+    // Requests table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS requests (
         id SERIAL PRIMARY KEY,
         created_by VARCHAR(255) NOT NULL,
@@ -178,8 +214,10 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'requests');
+
+    // Request items table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS request_items (
         id SERIAL PRIMARY KEY,
         request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
@@ -190,8 +228,10 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
-    `);
-    await pool.query(`
+    `, 'request_items');
+
+    // Approvals table
+    await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS approvals (
         id SERIAL PRIMARY KEY,
         request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
@@ -199,26 +239,45 @@ export async function initDB() {
         signature TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `, 'approvals');
 
-    // Seed default email settings if not exist
+    // Rejections table
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS rejections (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+        rejector_name VARCHAR(255) NOT NULL,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `, 'rejections');
+
+    // Seed default settings if not exist
     const defaults = [
       { key: 'from_name', value: 'Inventory System', desc: 'Sender name for low stock alert emails' },
       { key: 'from_email', value: 'helloriceug@gmail.com', desc: 'Sender email for low stock alert emails' }
     ];
     for (const def of defaults) {
-      const exists = await pool.query('SELECT id FROM settings WHERE key_name = $1', [def.key]);
-      if (exists.rowCount === 0) {
-        await pool.query(
-          'INSERT INTO settings (key_name, value, description) VALUES ($1, $2, $3)',
-          [def.key, def.value, def.desc]
-        );
+      try {
+        const exists = await pool.query('SELECT id FROM settings WHERE key_name = $1', [def.key]);
+        if (exists.rowCount === 0) {
+          await pool.query(
+            'INSERT INTO settings (key_name, value, description) VALUES ($1, $2, $3)',
+            [def.key, def.value, def.desc]
+          );
+          console.log(`Default setting "${def.key}" inserted.`);
+        } else {
+          console.log(`Default setting "${def.key}" already exists.`);
+        }
+      } catch (seedError) {
+        console.warn(`Error seeding default setting "${def.key}":`, seedError.message);
       }
     }
-    console.log('Database tables initialized');
+
+    console.log('Database initialization completed successfully. All tables are ready.');
   } catch (error) {
-    console.error('Error initializing database:', error.stack);
-    throw error;
+    console.error('Critical error during database initialization:', error.stack);
+    throw error; // Re-throw to prevent server start if DB init fails
   }
 }
 
@@ -363,6 +422,81 @@ export async function updateUserRole(userId, role, currentUserId, ip) {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error updating user role:', error.stack);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Update user details (name, email, role)
+export async function updateUser(userId, updates, currentUserId, ip) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { first_name, last_name, email, role } = updates;
+    
+    // Validate role
+    if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
+      throw new Error('Invalid role');
+    }
+    
+    // Check if email already exists (excluding current user)
+    if (email) {
+      const emailCheck = await client.query(
+        'SELECT id FROM users WHERE email = $1 AND id != $2',
+        [email.trim().toLowerCase(), userId]
+      );
+      if (emailCheck.rowCount > 0) {
+        throw new Error('Email already exists');
+      }
+    }
+    
+    const result = await client.query(
+      'UPDATE users SET first_name = $1, last_name = $2, email = $3, role = $4 WHERE id = $5 RETURNING *',
+      [first_name?.trim(), last_name?.trim(), email?.trim().toLowerCase(), role, userId]
+    );
+    
+    if (result.rowCount === 0) throw new Error('User not found');
+    
+    // Log audit
+    await insertAuditLog(client, currentUserId, 'update_user', ip, { user_id: userId, changes: { first_name, last_name, email, role } });
+    
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error updating user:', error.stack);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Delete user
+export async function deleteUser(userId, currentUserId, ip) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    // Prevent self-deletion
+    if (userId === currentUserId) {
+      throw new Error('Cannot delete your own account');
+    }
+    
+    const userResult = await client.query('SELECT first_name, last_name, email FROM users WHERE id = $1', [userId]);
+    if (userResult.rowCount === 0) throw new Error('User not found');
+    const deletedUser = userResult.rows[0];
+    
+    await client.query('DELETE FROM users WHERE id = $1', [userId]);
+    
+    // Log audit
+    await insertAuditLog(client, currentUserId, 'delete_user', ip, { user_id: userId, deleted_user: deletedUser });
+    
+    await client.query('COMMIT');
+    return { message: 'User deleted successfully' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting user:', error.stack);
     throw error;
   } finally {
     client.release();
@@ -925,10 +1059,12 @@ export async function createRequest(requestData, userId, ip) {
 export async function getRequests() {
   try {
     const result = await pool.query(`
-      SELECT r.*, COUNT(ri.id) AS item_count
+      SELECT r.*, 
+             (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS reject_reason,
+             COUNT(ri.id) AS item_count
       FROM requests r
       LEFT JOIN request_items ri ON r.id = ri.request_id
-      GROUP BY r.id
+      GROUP BY r.id, (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1)
       ORDER BY r.created_at DESC
     `);
     return result.rows;
@@ -973,19 +1109,28 @@ export async function updateRequest(requestId, requestData, userId, ip) {
   }
 }
 
-export async function rejectRequest(requestId, userId, ip) {
+export async function rejectRequest(requestId, userId, ip, rejectData) {
+  const { rejectorName, reason } = rejectData || {};
+  if (!reason || !reason.trim()) {
+    throw new Error('Rejection reason is required');
+  }
+  if (!rejectorName || !rejectorName.trim()) {
+    throw new Error('Rejector name is required');
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status = $3 RETURNING *',
-      ['rejected', requestId, 'pending']
+      'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status IN ($3, $4) RETURNING *',
+      ['rejected', requestId, 'pending', 'approved']
     );
-    if (result.rowCount === 0) throw new Error('Request not found or not pending');
-
+    if (result.rowCount === 0) throw new Error('Request not found or not rejectable (must be pending or approved)');
+    await client.query(
+      'INSERT INTO rejections (request_id, rejector_name, reason, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
+      [requestId, rejectorName, reason]
+    );
     // Log audit
-    await insertAuditLog(client, userId, 'reject_request', ip, { request_id: requestId });
-
+    await insertAuditLog(client, userId, 'reject_request', ip, { request_id: requestId, reason });
     await client.query('COMMIT');
     return { message: 'Request rejected' };
   } catch (error) {
@@ -1101,10 +1246,15 @@ export async function getRequestDetails(requestId) {
       'SELECT * FROM approvals WHERE request_id = $1 ORDER BY created_at DESC',
       [requestId]
     );
+    const rejections = await pool.query(
+      'SELECT * FROM rejections WHERE request_id = $1 ORDER BY created_at DESC',
+      [requestId]
+    );
     return {
       ...request.rows[0],
       items: items.rows,
       approvals: approvals.rows,
+      rejections: rejections.rows,
     };
   } catch (error) {
     console.error('Error fetching request details:', error.stack);

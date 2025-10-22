@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getItems } from '../api';
 import { useToast } from '@/hooks/use-toast';
@@ -13,7 +13,8 @@ interface Item {
 const LowStockNotifier: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [lastItems, setLastItems] = useState<{ [id: string]: number }>({});
+  const lastItemsRef = useRef<{ [id: string]: number }>({});
+  const notifiedItemsRef = useRef<Set<number>>(new Set()); // Track items already notified to prevent repeats
 
   const allowedRoles = ['superadmin', 'issuer'];
   if (!user || !allowedRoles.includes(user.role)) {
@@ -25,9 +26,19 @@ const LowStockNotifier: React.FC = () => {
       try {
         const items = await getItems();
         const lowStock = items.filter(item => item.quantity <= (item.low_stock_threshold || 0));
-        const newLowStock = lowStock.filter(item => !lastItems[item.id] || lastItems[item.id] > item.quantity);
+
+        // Only notify for truly new low stock: quantity decreased OR first time hitting threshold
+        const newLowStock = lowStock.filter(item => {
+          const prevQuantity = lastItemsRef.current[item.id];
+          const isNewLow = !prevQuantity || prevQuantity > item.quantity;
+          const alreadyNotified = notifiedItemsRef.current.has(item.id);
+          return isNewLow && !alreadyNotified;
+        });
 
         if (newLowStock.length > 0) {
+          // Mark as notified
+          newLowStock.forEach(item => notifiedItemsRef.current.add(item.id));
+
           toast({
             title: "Low Stock Notification",
             description: (
@@ -45,10 +56,14 @@ const LowStockNotifier: React.FC = () => {
             ),
             duration: 15000,
             className: "border border-amber-200 bg-amber-50",
+            // Assuming useToast is based on sonner or similar; configure for center positioning
+            // If using sonner, pass position="top-center" or customize the ToastProvider
+            // For true screen-center, consider switching to a modal (see note below)
           });
         }
 
-        setLastItems(items.reduce((acc, item) => ({ ...acc, [item.id]: item.quantity }), {}));
+        // Update last quantities (using ref to avoid re-triggering effect)
+        lastItemsRef.current = items.reduce((acc, item) => ({ ...acc, [item.id]: item.quantity }), {});
       } catch (error) {
         console.error('Error checking low stock:', error);
       }
@@ -57,7 +72,7 @@ const LowStockNotifier: React.FC = () => {
     checkLowStock();
     const interval = setInterval(checkLowStock, 10000);
     return () => clearInterval(interval);
-  }, [lastItems, user]);
+  }, [user]); // Removed lastItems from deps; use ref instead to prevent re-runs
 
   return null;
 };

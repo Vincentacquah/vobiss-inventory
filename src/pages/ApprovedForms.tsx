@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, XCircle, CheckCircle, AlertCircle, UserCheck } from 'lucide-react';
 import { getRequests, getRequestDetails, rejectRequest, finalizeRequest, approveRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +24,7 @@ interface Request {
   created_at: string;
   updated_at: string;
   item_count: number;
+  reject_reason?: string | null; // Added for rejection reason
 }
 
 interface RequestDetails extends Request {
@@ -44,6 +45,13 @@ interface RequestDetails extends Request {
     signature: string;
     approved_at: string;
   }[];
+  rejections?: { // Added for rejection details
+    id: number;
+    request_id: number;
+    rejector_name: string;
+    reason: string;
+    created_at: string;
+  }[];
 }
 
 const ApprovedForms: React.FC = () => {
@@ -61,11 +69,26 @@ const ApprovedForms: React.FC = () => {
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [approverName, setApproverName] = useState('');
   const [signature, setSignature] = useState('');
+  const [rejectReason, setRejectReason] = useState(''); // Added for rejection reason
   const [loading, setLoading] = useState(true);
+  const [isInteracting, setIsInteracting] = useState(false); // Track if user is in a modal/form
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
+
+  // Pause polling when interacting (modals open)
+  useEffect(() => {
+    const anyModalOpen = isFormOpen || isRejectOpen || isApproveOpen;
+    setIsInteracting(anyModalOpen);
+  }, [isFormOpen, isRejectOpen, isApproveOpen]);
 
   useEffect(() => {
     const loadRequests = async () => {
+      // Skip load if user is interacting (modal open) to prevent clearing forms
+      if (isInteracting) {
+        console.log('Skipping request reload due to active interaction');
+        return;
+      }
+
       try {
         setLoading(true);
         const data = await getRequests();
@@ -86,10 +109,14 @@ const ApprovedForms: React.FC = () => {
     };
 
     loadRequests();
-    const interval = setInterval(loadRequests, 30000);
+    intervalRef.current = setInterval(loadRequests, 30000);
 
-    return () => clearInterval(interval);
-  }, [canManageRequests]);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [canManageRequests, isInteracting]); // Re-run effect if interaction state changes
 
   useEffect(() => {
     filterRequests();
@@ -124,11 +151,25 @@ const ApprovedForms: React.FC = () => {
       await finalizeRequest(selectedRequest.id, data.items, data.releasedBy);
       setIsFormOpen(false);
       setSelectedRequest(null);
+      setIsInteracting(false); // Resume polling after action
       toast({
         title: "Success",
         description: "Request finalized successfully",
         variant: "default"
       });
+      // Optionally reload after success
+      const loadRequests = async () => {
+        try {
+          const data = await getRequests();
+          const filteredData = canManageRequests 
+            ? data 
+            : data.filter(request => ['approved', 'completed', 'rejected'].includes(request.status));
+          setAllRequests(filteredData);
+        } catch (error) {
+          console.error('Error reloading requests after finalize:', error);
+        }
+      };
+      loadRequests();
     } catch (error: any) {
       console.error('Error finalizing request:', error);
       toast({
@@ -146,11 +187,25 @@ const ApprovedForms: React.FC = () => {
       setIsApproveOpen(false);
       setApproverName('');
       setSignature('');
+      setIsInteracting(false); // Resume polling
       toast({
         title: "Success",
         description: "Request approved successfully",
         variant: "default"
       });
+      // Reload after approve
+      const loadRequests = async () => {
+        try {
+          const data = await getRequests();
+          const filteredData = canManageRequests 
+            ? data 
+            : data.filter(request => ['approved', 'completed', 'rejected'].includes(request.status));
+          setAllRequests(filteredData);
+        } catch (error) {
+          console.error('Error reloading requests after approve:', error);
+        }
+      };
+      loadRequests();
     } catch (error: any) {
       console.error('Error approving request:', error);
       toast({
@@ -162,20 +217,43 @@ const ApprovedForms: React.FC = () => {
   };
 
   const handleReject = async () => {
-    if (!selectedRequestId) return;
+    if (!selectedRequestId || !rejectReason.trim()) {
+      toast({
+        title: "Error",
+        description: "Rejection reason is required",
+        variant: "destructive"
+      });
+      return;
+    }
     try {
-      await rejectRequest(selectedRequestId);
+      const rejectorName = user?.full_name || user?.username || 'Unknown User';
+      await rejectRequest(selectedRequestId, { reason: rejectReason, rejectorName });
       setIsRejectOpen(false);
+      setRejectReason('');
+      setIsInteracting(false); // Resume polling
       toast({
         title: "Success",
-        description: "Request rejected",
+        description: "Request rejected successfully",
         variant: "default"
       });
+      // Reload after reject
+      const loadRequests = async () => {
+        try {
+          const data = await getRequests();
+          const filteredData = canManageRequests 
+            ? data 
+            : data.filter(request => ['approved', 'completed', 'rejected'].includes(request.status));
+          setAllRequests(filteredData);
+        } catch (error) {
+          console.error('Error reloading requests after reject:', error);
+        }
+      };
+      loadRequests();
     } catch (error: any) {
       console.error('Error rejecting request:', error);
       toast({
         title: "Error",
-        description: "Failed to reject request",
+        description: error.message || "Failed to reject request",
         variant: "destructive"
       });
     }
@@ -195,6 +273,7 @@ const ApprovedForms: React.FC = () => {
       const details = await getRequestDetails(requestId);
       setSelectedRequest(details);
       setIsFormOpen(true);
+      setIsInteracting(true); // Pause polling
     } catch (error) {
       console.error('Error loading request details:', error);
       toast({
@@ -208,6 +287,14 @@ const ApprovedForms: React.FC = () => {
   const openApproveForm = async (requestId: number) => {
     setSelectedRequestId(requestId);
     setIsApproveOpen(true);
+    setIsInteracting(true); // Pause polling
+  };
+
+  const openRejectForm = (requestId: number) => {
+    setSelectedRequestId(requestId);
+    setRejectReason(''); // Reset reason
+    setIsRejectOpen(true);
+    setIsInteracting(true); // Pause polling
   };
 
   const statusIcon = (status: string) => {
@@ -242,12 +329,7 @@ const ApprovedForms: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div className="text-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-600 mx-auto mb-4"></div>
-        <p className="text-gray-600">Loading requests...</p>
-      </div>
-    );
+    return <SkeletonTable canManageRequests={canManageRequests} tabs={tabs} />;
   }
 
   return (
@@ -338,6 +420,11 @@ const ApprovedForms: React.FC = () => {
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
                           {statusIcon(request.status)}
                           {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                          {request.status === 'rejected' && request.reject_reason && (
+                            <div className="ml-2 text-xs bg-red-200 px-2 py-1 rounded-full max-w-32 truncate" title={request.reject_reason}>
+                              {request.reject_reason.length > 20 ? `${request.reject_reason.substring(0, 20)}...` : request.reject_reason}
+                            </div>
+                          )}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -355,10 +442,7 @@ const ApprovedForms: React.FC = () => {
                                 Approve
                               </Button>
                               <Button
-                                onClick={() => {
-                                  setSelectedRequestId(request.id);
-                                  setIsRejectOpen(true);
-                                }}
+                                onClick={() => openRejectForm(request.id)}
                                 variant="destructive"
                                 size="sm"
                                 className="rounded-lg"
@@ -380,10 +464,7 @@ const ApprovedForms: React.FC = () => {
                               )}
                               {canManageRequests && (
                                 <Button
-                                  onClick={() => {
-                                    setSelectedRequestId(request.id);
-                                    setIsRejectOpen(true);
-                                  }}
+                                  onClick={() => openRejectForm(request.id)}
                                   variant="destructive"
                                   size="sm"
                                   className="rounded-lg"
@@ -422,6 +503,7 @@ const ApprovedForms: React.FC = () => {
             onCancel={() => {
               setIsFormOpen(false);
               setSelectedRequest(null);
+              setIsInteracting(false); // Resume polling
             }}
           />
         </div>
@@ -454,7 +536,7 @@ const ApprovedForms: React.FC = () => {
               />
             </div>
             <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-              <Button variant="outline" onClick={() => setIsApproveOpen(false)} className="border-gray-300 rounded-lg">Cancel</Button>
+              <Button variant="outline" onClick={() => { setIsApproveOpen(false); setIsInteracting(false); }} className="border-gray-300 rounded-lg">Cancel</Button>
               <Button 
                 onClick={handleApprove}
                 disabled={!approverName.trim() || !signature.trim()}
@@ -472,16 +554,95 @@ const ApprovedForms: React.FC = () => {
           <div className="text-center mb-6">
             <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900">REJECT REQUEST</h2>
+            <p className="text-gray-600">Provide a reason for rejection. This will be logged and visible in request details.</p>
           </div>
           <div className="space-y-4">
-            <p className="text-gray-600">Are you sure you want to reject this request? It will be marked as rejected and cannot be finalized.</p>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Rejection Reason *</label>
+              <Input
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Enter the reason for rejecting this request"
+                className="w-full border border-gray-300 focus:ring-2 focus:ring-red-500 focus:border-red-500 rounded-lg px-4 py-3"
+              />
+            </div>
             <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-              <Button variant="outline" onClick={() => setIsRejectOpen(false)} className="border-gray-300 rounded-lg">Cancel</Button>
-              <Button variant="destructive" onClick={handleReject} className="rounded-lg">Reject</Button>
+              <Button variant="outline" onClick={() => { setIsRejectOpen(false); setRejectReason(''); setIsInteracting(false); }} className="border-gray-300 rounded-lg">Cancel</Button>
+              <Button 
+                onClick={handleReject}
+                disabled={!rejectReason.trim()}
+                variant="destructive" 
+                className="rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Reject Request
+              </Button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+interface SkeletonTableProps {
+  canManageRequests: boolean;
+  tabs: ('pending' | 'approved' | 'completed' | 'rejected')[];
+}
+
+const SkeletonTable: React.FC<SkeletonTableProps> = ({ canManageRequests, tabs }) => {
+  const numRows = 5; // Number of skeleton rows to show
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto">
+      {/* Header Skeleton */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 animate-pulse">
+        <div className="space-y-2">
+          <div className="h-8 w-48 bg-gray-200 rounded"></div>
+          <div className="h-4 w-64 bg-gray-200 rounded"></div>
+        </div>
+      </div>
+
+      {/* Search Bar Skeleton */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6 animate-pulse">
+        <div className="h-10 w-full bg-gray-200 rounded-lg"></div>
+      </div>
+
+      {/* Tabs Skeleton */}
+      <div className="w-full animate-pulse">
+        <div className={`grid ${canManageRequests ? 'grid-cols-4' : 'grid-cols-3'} w-full bg-gray-50 rounded-xl p-1 mb-6`}>
+          {tabs.map((tab, index) => (
+            <div key={index} className="h-10 bg-gray-200 rounded-lg"></div>
+          ))}
+        </div>
+      </div>
+
+      {/* Table Skeleton */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-pulse">
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                {['Request ID', 'Project', 'Team Leader', 'Created By', 'Deployment Type', 'Items', 'Created At', 'Status', 'Actions'].map((header, index) => (
+                  <th key={index} className="px-6 py-3">
+                    <div className="h-4 w-full bg-gray-200 rounded"></div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {Array.from({ length: numRows }).map((_, rowIndex) => (
+                <tr key={rowIndex}>
+                  {Array.from({ length: 9 }).map((_, colIndex) => (
+                    <td key={colIndex} className="px-6 py-4">
+                      <div className={`h-4 ${colIndex < 8 ? 'w-32' : 'w-48'} bg-gray-200 rounded`}></div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };

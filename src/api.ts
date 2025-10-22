@@ -80,6 +80,7 @@ interface Request {
   created_at: string;
   updated_at: string;
   item_count: number;
+  reject_reason?: string | null; // Added for quick access in lists
 }
 
 interface RequestDetails extends Request {
@@ -99,6 +100,13 @@ interface RequestDetails extends Request {
     approver_name: string;
     signature: string;
     approved_at: string;
+  }[];
+  rejections?: { // Added for rejection details
+    id: number;
+    request_id: number;
+    rejector_name: string;
+    reason: string;
+    created_at: string;
   }[];
 }
 
@@ -220,6 +228,37 @@ export const createUser = async (firstName: string, lastName: string, email: str
   }
 };
 
+export const updateUser = async (userId: number, updates: { first_name: string; last_name: string; email: string; role: string }): Promise<User> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(updates),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error updating user:', error);
+    throw error;
+  }
+};
+
+export const deleteUser = async (userId: number): Promise<{ message: string }> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/${userId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    throw error;
+  }
+};
+
 export const resetUserPassword = async (userId: number): Promise<{ message: string }> => {
   try {
     const response = await apiFetch(`${API_URL}/users/${userId}/reset-password`, {
@@ -309,6 +348,23 @@ export const deleteSupervisor = async (supervisorId: number): Promise<boolean> =
     return true;
   } catch (error) {
     console.error('Error deleting supervisor:', error);
+    throw error;
+  }
+};
+
+// Low Stock Alert
+export const sendLowStockAlert = async (data: { lowStockItems: Item[]; supervisors: Supervisor[] }): Promise<{ message: string }> => {
+  try {
+    const response = await apiFetch(`${API_URL}/send-low-stock-alert`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error sending low stock alert:', error);
     throw error;
   }
 };
@@ -577,13 +633,14 @@ export const updateRequest = async (id: string | number, requestData: {
   }
 };
 
-export const rejectRequest = async (id: string | number): Promise<{ message: string }> => {
+export const rejectRequest = async (id: string | number, data: { reason: string; rejectorName: string }): Promise<{ message: string }> => {
   try {
     const response = await apiFetch(`${API_URL}/requests/${id}/reject`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify(data),
     });
     return await response.json();
   } catch (error) {

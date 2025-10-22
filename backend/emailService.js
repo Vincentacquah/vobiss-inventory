@@ -1,7 +1,7 @@
 // emailService.js
 import nodemailer from 'nodemailer';
 import pool from './db.js';
-import { getSettings } from './db.js';
+import { getSettings, getLowStockItems, getSupervisors } from './db.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -310,14 +310,13 @@ export async function sendResetPassword(email, username, password) {
   }
 }
 
-// Sends summary of ALL low stock items
-// Wrapped in try-catch to prevent main operations from failing
-export async function sendLowStockAlert(triggeredItem = null) {
+// Sends summary of low stock items (accepts optional lowStockItems and supervisors; fetches from DB if not provided)
+// Returns { success: true, sentTo: count, totalSupervisors: count, message: string } on success, throws on error
+export async function sendLowStockAlert(lowStockItemsParam = null, supervisorsParam = null) {
   console.log('=== Starting low stock alert check ===');
   try {
     if (!transporter) {
-      console.warn('Transporter not initialized, skipping email alert');
-      return;
+      throw new Error('Transporter not initialized, cannot send email alert');
     }
 
     const settings = await getSettings();
@@ -326,30 +325,33 @@ export async function sendLowStockAlert(triggeredItem = null) {
     const fromEmail = settings ? settings.from_email : process.env.SMTP_USER || 'helloriceug@gmail.com';
     console.log('Email from:', `"${fromName}" <${fromEmail}>`);
 
-    const supervisorsResult = await pool.query('SELECT * FROM supervisors ORDER BY name ASC');
-    const supervisors = supervisorsResult.rows;
-    console.log('Supervisors found:', supervisors.length, supervisors.map(s => s.email));
-    if (supervisors.length === 0) {
-      console.warn('No supervisors configured for low stock alerts');
-      return;
+    // Fetch low stock items if not provided
+    let lowStockItems;
+    if (!lowStockItemsParam || !Array.isArray(lowStockItemsParam)) {
+      lowStockItems = await getLowStockItems();
+    } else {
+      lowStockItems = lowStockItemsParam;
     }
-
-    // Fetch ALL low stock items (with category join only, no vendor)
-    const lowStockResult = await pool.query(`
-      SELECT 
-        i.id, i.name, i.quantity, i.low_stock_threshold, 
-        c.name as category_name
-      FROM items i
-      LEFT JOIN categories c ON i.category_id = c.id
-      WHERE i.quantity <= COALESCE(i.low_stock_threshold, 5)
-      ORDER BY i.quantity ASC, i.name
-    `);
-    const lowStockItems = lowStockResult.rows;
-    console.log('Low stock items found:', lowStockItems.length, lowStockItems.map(i => ({name: i.name, qty: i.quantity})));
+    console.log('Low stock items (provided or fetched):', lowStockItems.length, lowStockItems.map(i => ({name: i.name, qty: i.quantity})));
 
     if (lowStockItems.length === 0) {
       console.log('No low stock items to alert about');
-      return;
+      return { success: true, sentTo: 0, totalSupervisors: 0, message: 'No low stock items found' };
+    }
+
+    // Fetch supervisors if not provided
+    let supervisors;
+    if (!supervisorsParam || !Array.isArray(supervisorsParam)) {
+      const supervisorsResult = await pool.query('SELECT * FROM supervisors ORDER BY name ASC');
+      supervisors = supervisorsResult.rows;
+    } else {
+      supervisors = supervisorsParam;
+    }
+    console.log('Supervisors (provided or fetched):', supervisors.length, supervisors.map(s => s.email));
+
+    if (supervisors.length === 0) {
+      console.warn('No supervisors configured for low stock alerts');
+      return { success: true, sentTo: 0, totalSupervisors: 0, message: 'No supervisors to notify' };
     }
 
     // Separate critical (qty <= 0) and low (qty > 0 but <= threshold)
@@ -363,6 +365,9 @@ export async function sendLowStockAlert(triggeredItem = null) {
     const dateStr = now.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
     const timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const sendDateTime = `${dayName} ${dateStr} at ${timeStr}`;
+
+    let sentCount = 0;
+    const errors = [];
 
     for (const supervisor of supervisors) {
       let subject = 'Low Stock Alert Summary';
@@ -531,8 +536,20 @@ export async function sendLowStockAlert(triggeredItem = null) {
       // Use sendMail with error handling
       await transporter.sendMail(mailOptions);
       console.log(`Low stock summary alert sent successfully to ${supervisor.email} (${lowStockItems.length} items)`);
+      sentCount++;
     }
+
+    if (errors.length > 0) {
+      console.warn(`Failed to send to ${errors.length} supervisors: ${errors.join(', ')}`);
+    }
+
     console.log('=== Low stock alert process completed ===');
+    return { 
+      success: true, 
+      sentTo: sentCount, 
+      totalSupervisors: supervisors.length,
+      message: `Alert sent to ${sentCount} out of ${supervisors.length} supervisors` 
+    };
   } catch (error) {
     console.error('Error in sendLowStockAlert:', {
       message: error.message,
@@ -541,6 +558,6 @@ export async function sendLowStockAlert(triggeredItem = null) {
       command: error.command,
       stack: error.stack,
     });
-    // Do not re-throw; log only to prevent main ops from failing
+    throw new Error(`Failed to send low stock alert: ${error.message}`);
   }
 }

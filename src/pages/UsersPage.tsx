@@ -1,18 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getUsers, createUser, resetUserPassword, updateUserRole } from '../api';
-import { UserPlus, Mail, Key, Users, AlertCircle, X, CheckCircle } from 'lucide-react';
+import { getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser } from '../api';
+import { UserPlus, Mail, Key, Users, AlertCircle, X, CheckCircle, Edit, Trash2 } from 'lucide-react';
 
 const UsersPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [formData, setFormData] = useState({ first_name: '', last_name: '', email: '', role: 'requester' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [deletingUser, setDeletingUser] = useState<any>(null);
   const [resetting, setResetting] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editFormData, setEditFormData] = useState({ first_name: '', last_name: '', email: '', role: 'requester' });
 
   useEffect(() => {
     loadUsers();
@@ -68,6 +75,75 @@ const UsersPage: React.FC = () => {
       setTimeout(() => setError(''), 3000);
     } finally {
       setResetting(false);
+    }
+  };
+
+  const openEditModal = (userToEdit: any) => {
+    setEditingUser(userToEdit);
+    setEditFormData({
+      first_name: userToEdit.first_name || '',
+      last_name: userToEdit.last_name || '',
+      email: userToEdit.email || '',
+      role: userToEdit.role || 'requester'
+    });
+    setShowEditModal(true);
+  };
+
+  const closeEditModal = () => {
+    setShowEditModal(false);
+    setEditingUser(null);
+    setEditFormData({ first_name: '', last_name: '', email: '', role: 'requester' });
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    setUpdating(true);
+    setError('');
+    setSuccess('');
+    try {
+      await updateUser(editingUser.id, editFormData);
+      await loadUsers();
+      setSuccess('User updated successfully');
+      setTimeout(() => setSuccess(''), 3000);
+      closeEditModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to update user');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const openDeleteModal = (userToDelete: any) => {
+    if (userToDelete.id === currentUser?.id) {
+      setError('Cannot delete your own account');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+    setDeletingUser(userToDelete);
+    setShowDeleteModal(true);
+  };
+
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false);
+    setDeletingUser(null);
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deletingUser) return;
+    setDeleting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await deleteUser(deletingUser.id);
+      await loadUsers();
+      setSuccess('User deleted successfully');
+      setTimeout(() => setSuccess(''), 3000);
+      closeDeleteModal();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete user');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -130,74 +206,80 @@ const UsersPage: React.FC = () => {
           </div>
           
           <div className="p-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  First Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter first name"
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Last Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter last name"
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <form onSubmit={handleSubmit}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    First Name
+                  </label>
                   <input
-                    type="email"
-                    placeholder="user@example.com"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
+                    type="text"
+                    placeholder="Enter first name"
+                    value={formData.first_name}
+                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
+                    required
                   />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Last Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter last name"
+                    value={formData.last_name}
+                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input
+                      type="email"
+                      placeholder="user@example.com"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition"
+                      required
+                    />
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    User Role
+                  </label>
+                  <select
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition bg-white"
+                    required
+                  >
+                    <option value="requester">Requester</option>
+                    <option value="approver">Approver</option>
+                    <option value="issuer">Issuer</option>
+                    <option value="superadmin">Super Admin</option>
+                  </select>
                 </div>
               </div>
               
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  User Role
-                </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-gray-500 focus:border-gray-500 outline-none transition bg-white"
-                >
-                  <option value="requester">Requester</option>
-                  <option value="approver">Approver</option>
-                  <option value="issuer">Issuer</option>
-                  <option value="superadmin">Super Admin</option>
-                </select>
-              </div>
-            </div>
-            
-            <button 
-              onClick={handleSubmit}
-              disabled={loading || !formData.first_name || !formData.last_name || !formData.email}
-              className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-medium px-4 py-2 rounded-md transition duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-            >
-              <UserPlus className="w-3 h-3" />
-              {loading ? 'Creating User...' : 'Create User'}
-            </button>
+              <button 
+                type="submit"
+                disabled={loading || !formData.first_name || !formData.last_name || !formData.email}
+                className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-medium px-4 py-2 rounded-md transition duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <UserPlus className="w-3 h-3" />
+                {loading ? 'Creating User...' : 'Create User'}
+              </button>
+            </form>
           </div>
         </div>
 
@@ -271,13 +353,29 @@ const UsersPage: React.FC = () => {
                         </select>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => openResetModal(u)}
-                          className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-800 font-medium transition"
-                        >
-                          <Key className="w-3 h-3" />
-                          Reset Password
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => openEditModal(u)}
+                            className="text-blue-600 hover:text-blue-800 font-medium transition flex items-center gap-1 text-xs"
+                          >
+                            <Edit className="w-3 h-3" />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => openResetModal(u)}
+                            className="text-gray-600 hover:text-gray-800 font-medium transition flex items-center gap-1 text-xs"
+                          >
+                            <Key className="w-3 h-3" />
+                            Reset
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(u)}
+                            className="text-red-600 hover:text-red-800 font-medium transition flex items-center gap-1 text-xs"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -345,6 +443,162 @@ const UsersPage: React.FC = () => {
                     className="flex-1 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-medium px-3 py-2 rounded-md transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {resetting ? 'Resetting...' : 'Confirm Reset'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit User Modal */}
+        {showEditModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-3 z-50">
+            <div className="bg-white rounded-lg shadow-2xl max-w-md w-full overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="bg-white bg-opacity-20 p-1.5 rounded-md">
+                    <Edit className="w-4 h-4 text-white" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white">Edit User</h3>
+                </div>
+                <button
+                  onClick={closeEditModal}
+                  className="text-white hover:bg-white hover:bg-opacity-20 rounded-md p-1 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="p-4">
+                <form onSubmit={handleEditSubmit}>
+                  <div className="space-y-3 mb-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">First Name</label>
+                      <input
+                        type="text"
+                        value={editFormData.first_name}
+                        onChange={(e) => setEditFormData({ ...editFormData, first_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Last Name</label>
+                      <input
+                        type="text"
+                        value={editFormData.last_name}
+                        onChange={(e) => setEditFormData({ ...editFormData, last_name: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Email Address</label>
+                      <input
+                        type="email"
+                        value={editFormData.email}
+                        onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">User Role</label>
+                      <select
+                        value={editFormData.role}
+                        onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value })}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-white"
+                        required
+                      >
+                        <option value="requester">Requester</option>
+                        <option value="approver">Approver</option>
+                        <option value="issuer">Issuer</option>
+                        <option value="superadmin">Super Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={closeEditModal}
+                      disabled={updating}
+                      className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-medium rounded-md hover:bg-slate-50 transition disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updating || !editFormData.first_name || !editFormData.last_name || !editFormData.email}
+                      className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-3 py-2 rounded-md transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {updating ? 'Updating...' : 'Update User'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete User Modal */}
+        {showDeleteModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-3 z-50">
+            <div className="bg-white rounded-lg shadow-2xl max-w-sm w-full overflow-hidden">
+              <div className="bg-gradient-to-r from-red-600 to-red-700 px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="bg-white bg-opacity-20 p-1.5 rounded-md">
+                    <Trash2 className="w-4 h-4 text-white" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white">Delete User</h3>
+                </div>
+                <button
+                  onClick={closeDeleteModal}
+                  className="text-white hover:bg-white hover:bg-opacity-20 rounded-md p-1 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="p-4">
+                <div className="mb-4">
+                  <p className="text-slate-700 mb-3 text-sm">
+                    You are about to permanently delete this user:
+                  </p>
+                  <div className="bg-slate-50 rounded-md p-3 border border-slate-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="flex-shrink-0 h-10 w-10 bg-gradient-to-br from-gray-500 to-gray-600 rounded-full flex items-center justify-center">
+                        <span className="text-white font-semibold text-sm">
+                          {deletingUser?.first_name?.charAt(0)}{deletingUser?.last_name?.charAt(0)}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">
+                          {deletingUser?.first_name} {deletingUser?.last_name}
+                        </div>
+                        <div className="text-xs text-slate-600">{deletingUser?.email}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-red-600 mt-3">
+                    This action cannot be undone. Are you sure?
+                  </p>
+                </div>
+                
+                <div className="flex gap-2">
+                  <button
+                    onClick={closeDeleteModal}
+                    disabled={deleting}
+                    className="flex-1 px-3 py-2 border border-slate-300 text-slate-700 font-medium rounded-md hover:bg-slate-50 transition disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDeleteUser}
+                    disabled={deleting}
+                    className="flex-1 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white font-medium px-3 py-2 rounded-md transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {deleting ? 'Deleting...' : 'Confirm Delete'}
                   </button>
                 </div>
               </div>

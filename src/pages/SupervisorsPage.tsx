@@ -9,7 +9,14 @@ import {
   Eye, 
   Mail 
 } from 'lucide-react';
-import { getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor } from '../api';
+import { 
+  getSupervisors, 
+  addSupervisor, 
+  updateSupervisor, 
+  deleteSupervisor,
+  getLowStockItems,
+  sendLowStockAlert
+} from '../api';
 import { useAuth } from '../context/AuthContext';
 
 interface Supervisor {
@@ -33,6 +40,8 @@ const SupervisorsPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [formData, setFormData] = useState({ name: '', email: '' });
   const [formError, setFormError] = useState<string | null>(null);
+  const [sendingAlert, setSendingAlert] = useState(false);
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user || user.role !== 'superadmin') {
@@ -51,6 +60,31 @@ const SupervisorsPage: React.FC = () => {
       setError('Failed to fetch supervisors');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSendLowStockAlert = async () => {
+    try {
+      setSendingAlert(true);
+      setAlertMessage(null);
+
+      // Fetch current low stock items and supervisors using named exports
+      const lowStockItems = await getLowStockItems();
+      const currentSupervisors = await getSupervisors();
+
+      // Send alert via the named export function
+      const alertResponse = await sendLowStockAlert({
+        lowStockItems,
+        supervisors: currentSupervisors
+      });
+
+      // Show success message (backend returns { message: ... })
+      setAlertMessage(alertResponse.message || 'Low stock alert sent successfully!');
+    } catch (err: any) {
+      console.error('Error sending low stock alert:', err);
+      setAlertMessage(`Failed to send alert: ${err.message || 'Unknown error'}`);
+    } finally {
+      setSendingAlert(false);
     }
   };
 
@@ -124,14 +158,30 @@ const SupervisorsPage: React.FC = () => {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Supervisors Management</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Supervisor
-        </button>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleSendLowStockAlert}
+            disabled={sendingAlert}
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Mail className="h-4 w-4 mr-2" />
+            {sendingAlert ? 'Sending...' : 'Send Low Stock Alert'}
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Supervisor
+          </button>
+        </div>
       </div>
+
+      {alertMessage && (
+        <div className={`mb-4 p-4 border rounded-lg ${alertMessage.includes('Failed') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          {alertMessage}
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { getRequests, getItems, createRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
 
 interface Request {
@@ -101,7 +101,6 @@ const RequestForms: React.FC = () => {
     projectName: string;
     ispName: string;
     location: string;
-    releasedBy: string;
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
@@ -114,7 +113,7 @@ const RequestForms: React.FC = () => {
         projectName: formData.projectName,
         ispName: formData.ispName,
         location: formData.location,
-        releaseBy: formData.releasedBy || null,
+        releaseBy: null,
         receivedBy: formData.receivedBy,
         deployment: formData.deployment,
         items: formData.items,
@@ -304,7 +303,6 @@ interface RequestFormProps {
     projectName: string;
     ispName: string;
     location: string;
-    releasedBy: string;
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
@@ -321,12 +319,33 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
     projectName: '',
     ispName: '',
     location: '',
-    releasedBy: '',
     receivedBy: '',
     deployment: 'Deployment' as 'Deployment' | 'Maintenance',
   });
   const [selectedItems, setSelectedItems] = useState<{ name: string; requested: string }[]>([{ name: '', requested: '' }]);
   const [submitting, setSubmitting] = useState(false);
+
+  // Refs for form inputs
+  const createdByRef = useRef<HTMLInputElement>(null);
+  const teamLeaderNameRef = useRef<HTMLInputElement>(null);
+  const teamLeaderPhoneRef = useRef<HTMLInputElement>(null);
+  const projectNameRef = useRef<HTMLInputElement>(null);
+  const ispNameRef = useRef<HTMLInputElement>(null);
+  const locationRef = useRef<HTMLInputElement>(null);
+  const receivedByRef = useRef<HTMLInputElement>(null);
+  const deploymentRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
+  const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Handle Enter key navigation
+  const handleKeyDown = (e: React.KeyboardEvent, nextRef: React.RefObject<HTMLInputElement | HTMLSelectElement> | null) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (nextRef && nextRef.current) {
+        nextRef.current.focus();
+      }
+    }
+  };
 
   const handleAddItem = () => {
     setSelectedItems([...selectedItems, { name: '', requested: '' }]);
@@ -372,7 +391,6 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
       projectName: '',
       ispName: '',
       location: '',
-      releasedBy: '',
       receivedBy: '',
       deployment: 'Deployment' as 'Deployment' | 'Maintenance',
     });
@@ -386,8 +404,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Created By *</label>
           <Input
+            ref={createdByRef}
             value={formData.createdBy}
             onChange={(e) => setFormData({ ...formData, createdBy: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, teamLeaderNameRef)}
             placeholder="Your full name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -396,8 +416,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Team Leader Name *</label>
           <Input
+            ref={teamLeaderNameRef}
             value={formData.teamLeaderName}
             onChange={(e) => setFormData({ ...formData, teamLeaderName: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, teamLeaderPhoneRef)}
             placeholder="Team leader's full name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -406,8 +428,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Team Leader Phone</label>
           <Input
+            ref={teamLeaderPhoneRef}
             value={formData.teamLeaderPhone}
             onChange={(e) => setFormData({ ...formData, teamLeaderPhone: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, projectNameRef)}
             placeholder="Phone number"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -416,8 +440,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Project Name *</label>
           <Input
+            ref={projectNameRef}
             value={formData.projectName}
             onChange={(e) => setFormData({ ...formData, projectName: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, ispNameRef)}
             placeholder="Project name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -426,19 +452,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">ISP Name</label>
           <Input
+            ref={ispNameRef}
             value={formData.ispName}
             onChange={(e) => setFormData({ ...formData, ispName: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, locationRef)}
             placeholder="ISP name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
-        </div>
-        <div className="space-y-3">
-          <label className="block text-sm font-semibold text-gray-700">Released By</label>
-          <Input
-            value={formData.releasedBy}
-            onChange={(e) => setFormData({ ...formData, releasedBy: e.target.value })}
-            placeholder="Released by name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
           />
@@ -446,8 +464,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Location of Project *</label>
           <Input
+            ref={locationRef}
             value={formData.location}
             onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, receivedByRef)}
             placeholder="Project location"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -456,8 +476,10 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Received By *</label>
           <Input
+            ref={receivedByRef}
             value={formData.receivedBy}
             onChange={(e) => setFormData({ ...formData, receivedBy: e.target.value })}
+            onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
             placeholder="Received by name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
@@ -469,10 +491,12 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
         <div className="flex space-x-8 bg-gradient-to-r from-gray-50 to-gray-100 p-4 rounded-xl shadow-sm">
           <label className="flex items-center cursor-pointer space-x-3 bg-white px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
             <input
+              ref={(el) => (deploymentRefs.current[0] = el)}
               type="radio"
               value="Deployment"
               checked={formData.deployment === 'Deployment'}
               onChange={(e) => setFormData({ ...formData, deployment: e.target.value as 'Deployment' | 'Maintenance' })}
+              onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[1] ? { current: deploymentRefs.current[1] } : itemNameRefs.current[0] ? { current: itemNameRefs.current[0] } : null)}
               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               disabled={submitting}
             />
@@ -480,10 +504,12 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
           </label>
           <label className="flex items-center cursor-pointer space-x-3 bg-white px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
             <input
+              ref={(el) => (deploymentRefs.current[1] = el)}
               type="radio"
               value="Maintenance"
               checked={formData.deployment === 'Maintenance'}
               onChange={(e) => setFormData({ ...formData, deployment: e.target.value as 'Deployment' | 'Maintenance' })}
+              onKeyDown={(e) => handleKeyDown(e, itemNameRefs.current[0] ? { current: itemNameRefs.current[0] } : null)}
               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               disabled={submitting}
             />
@@ -507,8 +533,16 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
                 <tr key={index} className="border-t border-gray-100 hover:bg-white/60 transition-all duration-200">
                   <td className="border-r border-gray-200 p-4 font-semibold text-sm text-gray-900">{index + 1}</td>
                   <td className="border-r border-gray-200 p-4">
-                    <Select value={item.name} onValueChange={(value) => handleItemChange(index, 'name', value)} disabled={submitting}>
-                      <SelectTrigger className="w-full border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-3 py-2 shadow-sm transition-all duration-200 hover:shadow-md">
+                    <Select 
+                      value={item.name} 
+                      onValueChange={(value) => handleItemChange(index, 'name', value)} 
+                      disabled={submitting}
+                    >
+                      <SelectTrigger 
+                        ref={(el) => (itemNameRefs.current[index] = el)}
+                        className="w-full border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-3 py-2 shadow-sm transition-all duration-200 hover:shadow-md"
+                        onKeyDown={(e) => handleKeyDown(e, itemQtyRefs.current[index] ? { current: itemQtyRefs.current[index] } : null)}
+                      >
                         <SelectValue placeholder="Select Item" />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl shadow-lg border-gray-200">
@@ -522,9 +556,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
                   </td>
                   <td className="border-r border-gray-200 p-4">
                     <Input
+                      ref={(el) => (itemQtyRefs.current[index] = el)}
                       type="number"
                       value={item.requested}
                       onChange={(e) => handleItemChange(index, 'requested', e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, index === selectedItems.length - 1 ? null : itemNameRefs.current[index + 1] ? { current: itemNameRefs.current[index + 1] } : null)}
                       className="text-sm w-20 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-3 py-2 shadow-sm transition-all duration-200 hover:shadow-md"
                       min="0"
                       disabled={submitting}

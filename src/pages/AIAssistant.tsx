@@ -1,12 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, MessageSquare, HelpCircle, X, Info, User, Clock, Mail } from 'lucide-react';
+import { Send, Bot, MessageSquare, HelpCircle, X, Info, User, Clock, Mail, Download, FileText } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { getItems, getCategories, getItemsOut, addItem, getRequests, getAuditLogs } from '../api';
+import { 
+  getItems, 
+  getCategories, 
+  getItemsOut, 
+  addItem, 
+  getRequests, 
+  getAuditLogs,
+  getLowStockItems,
+  sendLowStockAlert,
+  getSupervisors,
+  getDashboardStats
+} from '../api';
 import { useAuth } from '../context/AuthContext';
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import jsPDF from 'jspdf';
 
 // Load string-similarity via CDN
 const script = document.createElement('script');
@@ -23,6 +35,8 @@ interface Message {
   isUser: boolean;
   timestamp: Date;
   options?: { text: string; action: () => void }[];
+  downloadBlob?: Blob;
+  downloadFilename?: string;
 }
 
 /**
@@ -35,6 +49,7 @@ interface Item {
   category_id: string | null;
   quantity: number;
   low_stock_threshold: number;
+  category_name?: string; // Added for PDF compatibility
 }
 
 /**
@@ -73,6 +88,15 @@ interface AuditLog {
 }
 
 /**
+ * PDF Result Interface
+ */
+interface PDFResult {
+  blob: Blob | null;
+  filename: string;
+  message: string;
+}
+
+/**
  * AIAssistant Component
  * Provides a conversational chat interface with real-time database interaction
  */
@@ -98,6 +122,7 @@ const AIAssistant: React.FC = () => {
     addItemData?: { itemName: string; categoryId: string | null; quantity: number | null; newCategoryName?: string };
     waitingFor?: 'itemName' | 'category' | 'newCategoryName' | 'quantity';
   }>({ mode: 'normal' });
+  const [dataCache, setDataCache] = useState<any>({ lastUpdate: 0 });
 
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -115,12 +140,15 @@ const AIAssistant: React.FC = () => {
     { topic: "Inventory overview", command: "inventory status", description: "Get a system summary" },
     { topic: "Add item", command: `add ${items[0]?.name || 'item'}`, description: "Add a new item to inventory" },
     { topic: "Restock suggestions", command: "suggest restock", description: "Get recommendations for restocking" },
+    { topic: "Send alert", command: "send low stock alert", description: "Notify supervisors about low stock via email" },
+    { topic: "Generate report", command: "generate low stock report", description: "Create a PDF report of low stock items" },
+    { topic: "Full system report", command: "generate full system report", description: "Comprehensive PDF with logins, inventory, issues, and health" },
   ];
 
-  // Real-time data refresh (every 10 seconds for responsiveness)
+  // Reduced real-time data refresh (every 30 seconds for speed)
   useEffect(() => {
     loadInitialData();
-    const interval = setInterval(loadInitialData, 10000);
+    const interval = setInterval(loadInitialData, 30000); // Less frequent for speed
     return () => clearInterval(interval);
   }, [user?.role]);
 
@@ -129,13 +157,17 @@ const AIAssistant: React.FC = () => {
   }, [messages]);
 
   const loadInitialData = async () => {
+    const now = Date.now();
+    if (dataCache.lastUpdate && now - dataCache.lastUpdate < 30000) return; // Cache for 30s
+
     try {
-      const [fetchedItems, fetchedCategories, itemsOut, fetchedRequests, fetchedAuditLogs] = await Promise.all([
+      const [fetchedItems, fetchedCategories, itemsOut, fetchedRequests, fetchedAuditLogs, stats] = await Promise.all([
         getItems(),
         getCategories(),
         getItemsOut(),
         getRequests(),
-        getAuditLogs()
+        getAuditLogs(),
+        getDashboardStats()
       ]);
       const lowStockItems = fetchedItems.filter(item => item.quantity <= item.low_stock_threshold);
       const loginLogs = fetchedAuditLogs.filter(log => log.action === 'login').sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -146,17 +178,13 @@ const AIAssistant: React.FC = () => {
       setRequests(fetchedRequests);
       setAuditLogs(fetchedAuditLogs);
       setSystemStatus({
-        totalItems: fetchedItems.length,
-        lowStockItems: lowStockItems.length,
-        categoriesCount: fetchedCategories.length,
-        recentActivity: itemsOut.length,
+        totalItems: stats.totalItems,
+        lowStockItems: stats.lowStockItems,
+        categoriesCount: stats.totalCategories,
+        recentActivity: stats.itemsOut,
         lastLogin,
       });
-
-      if (messages.length === 0) {
-        addMessage("Hello! I'm your smart inventory assistant, ready to help with real-time data. What's up?", false);
-        addMessage(`Try: "Show low stock" or "Add ${items[0]?.name || 'item'}"`, false);
-      }
+      setDataCache({ ...dataCache, lastUpdate: now, items: fetchedItems, categories: fetchedCategories, requests: fetchedRequests, auditLogs: fetchedAuditLogs, itemsOut, stats });
     } catch (error) {
       console.error("Error loading data:", error);
       toast({ title: "Error", description: "Failed to fetch system data", variant: "destructive" });
@@ -167,53 +195,569 @@ const AIAssistant: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const addMessage = (text: string, isUser: boolean, options?: { text: string; action: () => void }[]) => {
+  const addMessage = (text: string, isUser: boolean, options?: { text: string; action: () => void }[], downloadBlob?: Blob, downloadFilename?: string) => {
     const newMessage: Message = {
       id: Date.now().toString(),
       text,
       isUser,
       timestamp: new Date(),
       options,
+      downloadBlob,
+      downloadFilename,
     };
     setMessages(prev => [...prev, newMessage]);
   };
 
-  const sendLowStockEmail = async () => {
+  const handleDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const loadLogo = async (): Promise<string> => {
     try {
-      await fetch('/api/send-low-stock-alert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: JSON.stringify({ force: true }),
+      const response = await fetch('/vobiss-logo.png');
+      if (!response.ok) throw new Error('Logo not found');
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
       });
-      toast({ title: "Success", description: "Low stock email sent!", variant: "default" });
-      addMessage("Sent low stock alert email to the team.", false);
     } catch (error) {
-      console.error("Error sending email:", error);
-      toast({ title: "Error", description: "Failed to send email", variant: "destructive" });
-      addMessage("Could not send email. Check system logs.", false);
+      console.error('Error loading logo:', error);
+      return ''; // Return empty if failed
+    }
+  };
+
+  const generateLowStockPDF = async (): Promise<PDFResult> => {
+    try {
+      const lowStockItems = await getLowStockItems();
+      if (lowStockItems.length === 0) {
+        return {
+          blob: null,
+          filename: '',
+          message: "No low stock items right now – everything's looking good! No report needed."
+        };
+      }
+
+      const doc = new jsPDF();
+      const date = new Date().toLocaleDateString();
+      const logoBase64 = await loadLogo();
+      
+      let yPos = 20;
+      
+      // Add logo if available
+      if (logoBase64) {
+        doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+        yPos += 15;
+      }
+
+      // Title with grey background
+      doc.setFillColor(158, 158, 158); // Grey-500
+      doc.rect(20, yPos, 170, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20);
+      doc.setFont(undefined, 'bold');
+      doc.text('Low Stock Report - Vobiss Inventory', 105, yPos + 8, { align: 'center' });
+      yPos += 20;
+      
+      // Subtitle
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      doc.text(`Generated on: ${date}`, 20, yPos);
+      yPos += 5;
+      doc.text(`Total Low Stock Items: ${lowStockItems.length}`, 20, yPos);
+      yPos += 15;
+
+      // Decorative line
+      doc.setDrawColor(189, 195, 199); // Grey-400
+      doc.setLineWidth(1);
+      doc.line(20, yPos, 190, yPos);
+      yPos += 10;
+
+      // Table setup
+      const tableX = 20;
+      const tableWidth = 170;
+      const colWidths = { item: 80, qty: 25, thresh: 25, status: 40 };
+      const headerHeight = 8;
+      const rowHeight = 7;
+
+      // Table header
+      doc.setFillColor(189, 195, 199); // Lighter grey header
+      doc.rect(tableX, yPos, tableWidth, headerHeight, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'bold');
+      doc.text('Item', tableX + 5, yPos + 6, { align: 'left' });
+      doc.text('Quantity', tableX + colWidths.item + 5, yPos + 6, { align: 'left' });
+      doc.text('Threshold', tableX + colWidths.item + colWidths.qty + 5, yPos + 6, { align: 'left' });
+      doc.text('Status', tableX + colWidths.item + colWidths.qty + colWidths.thresh + 5, yPos + 6, { align: 'left' });
+      yPos += headerHeight;
+
+      // Table border
+      doc.setDrawColor(158, 158, 158);
+      doc.setLineWidth(0.5);
+      doc.rect(tableX, yPos - headerHeight, tableWidth, headerHeight + (lowStockItems.length * rowHeight) + 1, 'S');
+
+      // Table rows
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'normal');
+      lowStockItems.forEach((item: any, index: number) => {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+          // Add logo on new page if available
+          if (logoBase64) {
+            doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+            yPos += 15;
+          }
+          // Redraw header on new page
+          doc.setFillColor(189, 195, 199);
+          doc.rect(tableX, yPos, tableWidth, headerHeight, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont(undefined, 'bold');
+          doc.text('Item', tableX + 5, yPos + 6, { align: 'left' });
+          doc.text('Quantity', tableX + colWidths.item + 5, yPos + 6, { align: 'left' });
+          doc.text('Threshold', tableX + colWidths.item + colWidths.qty + 5, yPos + 6, { align: 'left' });
+          doc.text('Status', tableX + colWidths.item + colWidths.qty + colWidths.thresh + 5, yPos + 6, { align: 'left' });
+          yPos += headerHeight;
+          doc.setTextColor(0, 0, 0);
+          doc.setFont(undefined, 'normal');
+        }
+
+        const status = item.quantity === 0 ? 'OUT OF STOCK ❤️' : item.quantity < 3 ? 'CRITICAL' : 'LOW';
+        const statusColor = item.quantity === 0 ? [220, 53, 69] : item.quantity < 3 ? [255, 193, 7] : [40, 167, 69]; // Red, Yellow, Green
+        doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+        doc.setFont(undefined, 'bold');
+
+        doc.text(item.name.substring(0, 20) + (item.name.length > 20 ? '...' : ''), tableX + 5, yPos + 5, { align: 'left' });
+        doc.text(item.quantity.toString(), tableX + colWidths.item + 5, yPos + 5, { align: 'left' });
+        doc.text(item.low_stock_threshold.toString(), tableX + colWidths.item + colWidths.qty + 5, yPos + 5, { align: 'left' });
+        doc.text(status, tableX + colWidths.item + colWidths.qty + colWidths.thresh + 5, yPos + 5, { align: 'left' });
+
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+        yPos += rowHeight;
+      });
+
+      // Footer note with heart
+      doc.setTextColor(149, 165, 166); // Grey-600
+      doc.setFontSize(8);
+      doc.text('Generated with love by Vobiss Inventory AI Assistant ❤️', 20, yPos + 10);
+
+      const pdfBlob = doc.output('blob');
+      const filename = `low-stock-report-${date}.pdf`;
+
+      return {
+        blob: pdfBlob,
+        filename,
+        message: `PDF report generated! It includes all ${lowStockItems.length} low stock items with details. Click below to download.`
+      };
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      toast({ title: "Error", description: "Failed to generate report.", variant: "destructive" });
+      return {
+        blob: null,
+        filename: '',
+        message: "Sorry, couldn't create the PDF right now. Let's try again or check the low stock manually?"
+      };
+    }
+  };
+
+  const generateFullSystemPDF = async (): Promise<PDFResult> => {
+    try {
+      setLoading(true);
+      const [stats, auditLogsFull, itemsFull, itemsOutFull, lowStockItems] = await Promise.all([
+        getDashboardStats(),
+        getAuditLogs(),
+        getItems(),
+        getItemsOut(),
+        getLowStockItems()
+      ]);
+
+      const loginLogs = auditLogsFull.filter(log => log.action === 'login').slice(0, 10);
+      const recentIssues = itemsOutFull.slice(0, 20);
+      const date = new Date().toLocaleDateString();
+      const logoBase64 = await loadLogo();
+
+      const doc = new jsPDF();
+      let yPos = 20;
+
+      // Add logo
+      if (logoBase64) {
+        doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+        yPos += 15;
+      }
+
+      // Title with grey background
+      doc.setFillColor(158, 158, 158); // Grey-500
+      doc.rect(20, yPos, 170, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont(undefined, 'bold');
+      doc.text('Vobiss Inventory System - Full Health Report', 105, yPos + 8, { align: 'center' });
+      yPos += 15;
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(12);
+      doc.text(`Generated: ${date} | User: ${user?.full_name || 'Admin'}`, 105, yPos, { align: 'center' });
+      yPos += 20;
+      doc.setTextColor(0, 0, 0);
+      doc.setFont(undefined, 'normal');
+
+      // Decorative line
+      doc.setDrawColor(189, 195, 199);
+      doc.setLineWidth(1);
+      doc.line(20, yPos, 190, yPos);
+      yPos += 10;
+
+      // Section 1: System Health Overview - Use a simple table
+      doc.setFillColor(189, 195, 199); // Lighter grey header
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.text('1. System Health Overview', 20, yPos);
+      yPos += 10;
+      doc.setFillColor(248, 249, 250); // Very light grey for rows
+      doc.rect(20, yPos, 170, 25, 'F');
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text(`Total Items: ${stats.totalItems}`, 25, yPos + 7);
+      doc.text(`Categories: ${stats.totalCategories}`, 25, yPos + 14);
+      doc.text(`Items Issued: ${stats.itemsOut}`, 90, yPos + 7);
+      doc.text(`Pending Requests: ${stats.pendingRequests}`, 90, yPos + 14);
+      doc.text(`Low Stock Alerts: ${stats.lowStockItems}`, 155, yPos + 7);
+      const healthStatus = stats.lowStockItems === 0 ? 'Healthy ❤️' : 'Needs Attention';
+      const healthColor = stats.lowStockItems === 0 ? [40, 167, 69] : [220, 53, 69];
+      doc.setTextColor(healthColor[0], healthColor[1], healthColor[2]);
+      doc.setFont(undefined, 'bold');
+      doc.text(`System Status: ${healthStatus}`, 155, yPos + 14);
+      yPos += 35;
+      doc.setTextColor(0, 0, 0);
+      doc.setFont(undefined, 'normal');
+
+      // Section 2: Recent Logins - Table
+      doc.setFillColor(189, 195, 199);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(12);
+      doc.text('2. Recent Logins (Last 10)', 20, yPos);
+      yPos += 10;
+      doc.setFontSize(10);
+      if (loginLogs.length > 0) {
+        const tableX = 20;
+        const tableWidth = 170;
+        const colWidths = { num: 10, user: 60, time: 50, ip: 50 };
+        const headerHeight = 8;
+        const rowHeight = 6;
+        let tableY = yPos;
+
+        // Header
+        doc.setFillColor(158, 158, 158);
+        doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text('#', tableX + 5, tableY + 6);
+        doc.text('User', tableX + colWidths.num + 5, tableY + 6);
+        doc.text('Time', tableX + colWidths.num + colWidths.user + 5, tableY + 6);
+        doc.text('IP', tableX + colWidths.num + colWidths.user + colWidths.time + 5, tableY + 6);
+        tableY += headerHeight;
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+
+        // Border
+        doc.setDrawColor(158, 158, 158);
+        doc.rect(tableX, yPos, tableWidth, headerHeight + (Math.min(loginLogs.length, 10) * rowHeight) + 1, 'S');
+
+        // Rows
+        loginLogs.slice(0, 10).forEach((log, index) => {
+          if (tableY > 270) {
+            doc.addPage();
+            tableY = 20;
+            // Add logo on new page
+            if (logoBase64) {
+              doc.addImage(logoBase64, 'PNG', 20, tableY, 30, 10);
+              tableY += 15;
+            }
+            // Redraw header
+            doc.setFillColor(158, 158, 158);
+            doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.text('#', tableX + 5, tableY + 6);
+            doc.text('User', tableX + colWidths.num + 5, tableY + 6);
+            doc.text('Time', tableX + colWidths.num + colWidths.user + 5, tableY + 6);
+            doc.text('IP', tableX + colWidths.num + colWidths.user + colWidths.time + 5, tableY + 6);
+            tableY += headerHeight;
+            doc.setTextColor(0, 0, 0);
+          }
+          doc.text((index + 1).toString(), tableX + 5, tableY + 5);
+          doc.text((log.full_name || log.username || 'Unknown').substring(0, 15) + '...', tableX + colWidths.num + 5, tableY + 5);
+          doc.text(new Date(log.timestamp).toLocaleString().substring(0, 20) + '...', tableX + colWidths.num + colWidths.user + 5, tableY + 5);
+          doc.text(log.ip_address.substring(0, 15) + '...', tableX + colWidths.num + colWidths.user + colWidths.time + 5, tableY + 5);
+          tableY += rowHeight;
+        });
+        yPos = tableY + 10;
+      } else {
+        doc.text('No recent logins recorded. All quiet! ❤️', 20, yPos);
+        yPos += 10;
+      }
+
+      // Section 3: Current Inventory Summary - Simple list with colors
+      doc.setFillColor(189, 195, 199);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(12);
+      doc.text('3. Current Inventory Summary', 20, yPos);
+      yPos += 10;
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.setFont(undefined, 'normal');
+      const categoryTotals = itemsFull.reduce((acc, item) => {
+        const catName = item.category_name || 'Uncategorized';
+        acc[catName] = (acc[catName] || 0) + item.quantity;
+        return acc;
+      }, {} as { [key: string]: number });
+      Object.entries(categoryTotals).forEach(([cat, total]) => {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+          if (logoBase64) {
+            doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+            yPos += 15;
+          }
+        }
+        const catColor = total < 10 ? [220, 53, 69] : [40, 167, 69]; // Red if low total, green otherwise
+        doc.setTextColor(catColor[0], catColor[1], catColor[2]);
+        doc.setFont(undefined, total < 10 ? 'bold' : 'normal');
+        doc.text(`${cat}: ${total} units total ❤️`, 20, yPos);
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+        yPos += 7;
+      });
+      yPos += 10;
+
+      // Section 4: Recent Issued Items - Table
+      doc.setFillColor(189, 195, 199);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(12);
+      doc.text('4. Recent Issued Items (Last 20)', 20, yPos);
+      yPos += 10;
+      doc.setFontSize(10);
+      if (recentIssues.length > 0) {
+        const tableX = 20;
+        const tableWidth = 170;
+        const colWidths = { num: 10, user: 50, qtyItem: 60, time: 50 };
+        const headerHeight = 8;
+        const rowHeight = 6;
+        let tableY = yPos;
+
+        // Header
+        doc.setFillColor(158, 158, 158);
+        doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text('#', tableX + 5, tableY + 6);
+        doc.text('User', tableX + colWidths.num + 5, tableY + 6);
+        doc.text('Qty x Item', tableX + colWidths.num + colWidths.user + 5, tableY + 6);
+        doc.text('Time', tableX + colWidths.num + colWidths.user + colWidths.qtyItem + 5, tableY + 6);
+        tableY += headerHeight;
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+
+        // Border
+        doc.setDrawColor(158, 158, 158);
+        doc.rect(tableX, yPos, tableWidth, headerHeight + (Math.min(recentIssues.length, 20) * rowHeight) + 1, 'S');
+
+        // Rows
+        recentIssues.slice(0, 20).forEach((issue, index) => {
+          if (tableY > 270) {
+            doc.addPage();
+            tableY = 20;
+            if (logoBase64) {
+              doc.addImage(logoBase64, 'PNG', 20, tableY, 30, 10);
+              tableY += 15;
+            }
+            // Redraw header
+            doc.setFillColor(158, 158, 158);
+            doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.text('#', tableX + 5, tableY + 6);
+            doc.text('User', tableX + colWidths.num + 5, tableY + 6);
+            doc.text('Qty x Item', tableX + colWidths.num + colWidths.user + 5, tableY + 6);
+            doc.text('Time', tableX + colWidths.num + colWidths.user + colWidths.qtyItem + 5, tableY + 6);
+            tableY += headerHeight;
+            doc.setTextColor(0, 0, 0);
+          }
+          doc.text((index + 1).toString(), tableX + 5, tableY + 5);
+          doc.text(issue.person_name.substring(0, 15) + '...', tableX + colWidths.num + 5, tableY + 5);
+          doc.text(`${issue.quantity} x ${issue.item_name.substring(0, 20)}...`, tableX + colWidths.num + colWidths.user + 5, tableY + 5);
+          doc.text(new Date(issue.date_time).toLocaleString().substring(0, 20) + '...', tableX + colWidths.num + colWidths.user + colWidths.qtyItem + 5, tableY + 5);
+          tableY += rowHeight;
+        });
+        yPos = tableY + 10;
+      } else {
+        doc.text('No issued items recorded. Peaceful day! ❤️', 20, yPos);
+        yPos += 10;
+      }
+
+      // Section 5: Low Stock Items - Reuse low stock table logic
+      doc.setFillColor(189, 195, 199);
+      doc.setTextColor(255, 255, 255);
+      doc.setFont(undefined, 'bold');
+      doc.setFontSize(12);
+      doc.text('5. Low Stock Items', 20, yPos);
+      yPos += 10;
+      doc.setFontSize(10);
+      if (lowStockItems.length > 0) {
+        const tableX = 20;
+        const tableWidth = 170;
+        const colWidths = { num: 10, item: 70, qtyThresh: 40, cat: 50 };
+        const headerHeight = 8;
+        const rowHeight = 6;
+        let tableY = yPos;
+
+        // Header
+        doc.setFillColor(158, 158, 158);
+        doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+        doc.setTextColor(255, 255, 255);
+        doc.text('#', tableX + 5, tableY + 6);
+        doc.text('Item', tableX + colWidths.num + 5, tableY + 6);
+        doc.text('Qty/Threshold', tableX + colWidths.num + colWidths.item + 5, tableY + 6);
+        doc.text('Category', tableX + colWidths.num + colWidths.item + colWidths.qtyThresh + 5, tableY + 6);
+        tableY += headerHeight;
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+
+        // Border
+        doc.setDrawColor(158, 158, 158);
+        doc.rect(tableX, yPos, tableWidth, headerHeight + (lowStockItems.length * rowHeight) + 1, 'S');
+
+        // Rows
+        lowStockItems.forEach((item, index) => {
+          if (tableY > 270) {
+            doc.addPage();
+            tableY = 20;
+            if (logoBase64) {
+              doc.addImage(logoBase64, 'PNG', 20, tableY, 30, 10);
+              tableY += 15;
+            }
+            // Redraw header
+            doc.setFillColor(158, 158, 158);
+            doc.rect(tableX, tableY, tableWidth, headerHeight, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.text('#', tableX + 5, tableY + 6);
+            doc.text('Item', tableX + colWidths.num + 5, tableY + 6);
+            doc.text('Qty/Threshold', tableX + colWidths.num + colWidths.item + 5, tableY + 6);
+            doc.text('Category', tableX + colWidths.num + colWidths.item + colWidths.qtyThresh + 5, tableY + 6);
+            tableY += headerHeight;
+            doc.setTextColor(0, 0, 0);
+          }
+          doc.text((index + 1).toString(), tableX + 5, tableY + 5);
+          doc.text(item.name.substring(0, 20) + '...', tableX + colWidths.num + 5, tableY + 5);
+          doc.text(`${item.quantity}/${item.low_stock_threshold}`, tableX + colWidths.num + colWidths.item + 5, tableY + 5);
+          const catColor = item.quantity === 0 ? [220, 53, 69] : [255, 193, 7];
+          doc.setTextColor(catColor[0], catColor[1], catColor[2]);
+          doc.text((item.category_name || 'N/A').substring(0, 15) + '...', tableX + colWidths.num + colWidths.item + colWidths.qtyThresh + 5, tableY + 5);
+          doc.setTextColor(0, 0, 0);
+          tableY += rowHeight;
+        });
+        yPos = tableY + 10;
+      } else {
+        doc.setTextColor(40, 167, 69);
+        doc.text('No low stock items – system is balanced! ❤️', 20, yPos);
+        yPos += 10;
+      }
+
+      // Footer
+      doc.setTextColor(149, 165, 166);
+      doc.setFontSize(8);
+      doc.text('Generated with love by Vobiss Inventory AI Assistant ❤️', 20, yPos);
+
+      const pdfBlob = doc.output('blob');
+      const filename = `full-system-report-${date}.pdf`;
+
+      return {
+        blob: pdfBlob,
+        filename,
+        message: `Full system report compiled! 📊 It covers health stats, recent logins (${loginLogs.length}), inventory breakdown, issued items (${recentIssues.length}), and low stock alerts (${lowStockItems.length}). Your all-in-one health check. Click below to download. What stands out, or need a deeper dive?`
+      };
+    } catch (error) {
+      console.error("Error generating full PDF:", error);
+      toast({ title: "Error", description: "Failed to generate full report.", variant: "destructive" });
+      return {
+        blob: null,
+        filename: '',
+        message: "Bump in the road on that full report – data's there, but PDF hiccup. Retry or snag sections individually?"
+      };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendAlert = async () => {
+    try {
+      setLoading(true);
+      const lowStockItems = await getLowStockItems();
+      if (lowStockItems.length === 0) {
+        addMessage("No low stock items to alert on – the team's off the hook today! What next?", false);
+        setLoading(false);
+        return;
+      }
+
+      const supervisors = await getSupervisors();
+      const response = await sendLowStockAlert({ lowStockItems, supervisors });
+
+      addMessage(`Alert fired off! 📧 I let the supervisors know about those ${lowStockItems.length} items. They'll jump on restocking. Response: "${response.message}". High five? What's up next?`, false, [{
+        text: "Full System Report",
+        action: async () => {
+          const result = await generateFullSystemPDF();
+          addMessage(result.message, false, undefined, result.blob, result.filename);
+        }
+      }]);
+    } catch (error) {
+      console.error("Error sending alert:", error);
+      toast({ title: "Oops", description: "Alert send failed. Check settings?", variant: "destructive" });
+      addMessage("Hit a bump sending the alert – maybe check the email setup? Want me to try again?", false);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    addMessage(input, true);
+    const userMessage = input.trim();
+    addMessage(userMessage, true);
+    setInput('');
     setLoading(true);
+    inputRef.current?.focus();
+
     try {
-      await processQuery(input);
+      await processQuery(userMessage);
     } catch (error) {
       console.error("Error:", error);
       toast({ title: "Error", description: "Something went wrong. Try again?", variant: "destructive" });
-      addMessage("Oops, something broke. Please rephrase or try again.", false);
+      addMessage("Whoops – that didn't go as planned. Rephrase it, and I'll give it another shot!", false);
     } finally {
-      setInput('');
       setLoading(false);
-      inputRef.current?.focus();
     }
   };
 
   const processQuery = async (query: string) => {
     const lowerQuery = query.toLowerCase().trim();
     const stringSimilarity = (window as any).stringSimilarity;
+
+    // Fetch fresh data only if cache is stale (for speed)
+    if (!dataCache.lastUpdate || Date.now() - dataCache.lastUpdate > 10000) {
+      await loadInitialData();
+    }
+    const { items: fetchedItems, itemsOut, categories: fetchedCategories, requests: fetchedRequests, auditLogs: fetchedAuditLogs, stats } = dataCache;
 
     // Handle conversational flow for adding items
     if (conversationState.mode === 'addingItem' && conversationState.waitingFor) {
@@ -223,41 +767,25 @@ const AIAssistant: React.FC = () => {
 
     if (lowerQuery === 'help') {
       setShowHelpPanel(true);
-      addMessage("Here’s what I can do for you:", false);
-      addMessage("• Search items in real-time\n• Check stock and send alerts\n• Browse categories\n• Track user activity and logins\n• View requests (Super Admin)\n• Add items with ease\n• Get summaries and restock advice", false);
+      addMessage("Hey! I'm here to make inventory management a breeze. Here's a quick guide to get you chatting:", false);
       return;
     }
 
     if (lowerQuery.includes('thank') || lowerQuery.includes('thanks')) {
-      addMessage("You're very welcome! What's next?", false);
+      addMessage("My pleasure! Always happy to dive into the details with you. What's on deck?", false);
       return;
     }
 
-    if (lowerQuery.includes('hello') || lowerQuery.includes('hi')) {
-      addMessage(`Hi there! It's ${new Date().toLocaleString()}. Ready to manage your inventory?`, false);
-      return;
-    }
-
-    // Fetch fresh data for every query
-    const [fetchedItems, itemsOut, fetchedCategories, fetchedRequests, fetchedAuditLogs] = await Promise.all([
-      getItems(),
-      getItemsOut(),
-      getCategories(),
-      getRequests(),
-      getAuditLogs()
-    ]);
-    setItems(fetchedItems);
-    setCategories(fetchedCategories);
-    setRequests(fetchedRequests);
-    setAuditLogs(fetchedAuditLogs);
-
-    if (!fetchedItems || !itemsOut || !fetchedCategories || !fetchedRequests || !fetchedAuditLogs) {
-      addMessage("Can't connect to the database right now. Try again soon?", false);
+    if (lowerQuery.includes('hello') || lowerQuery.includes('hi') || messages.length === 0) {
+      addMessage(`Hey ${user?.first_name || 'there'}! Ready to tackle inventory? Just ask away – I'm all ears (or algorithms). What's first?`, false);
       return;
     }
 
     // Advanced intent detection with regex
     const intents = {
+      generateFullReport: { patterns: [/full.*report|system.*report|complete.*overview|system.*health|full.*health/i], weight: 1.0 },
+      generateReport: { patterns: [/generate.*report|pdf.*report|low.*stock.*report|export.*low/i], weight: 1.0 },
+      sendAlert: { patterns: [/send.*alert|notify.*supervisors|email.*low.*stock|alert.*team/i], weight: 1.0 },
       stockCheck: { patterns: [/low.*stock|stock.*level|restock|out.*stock|quantity|available/i], weight: 1.0 },
       search: { patterns: [/find|search|show|look|where|have/i], weight: 0.9 },
       category: { patterns: [/category|in.*category|categories|section/i], weight: 0.8 },
@@ -301,7 +829,7 @@ const AIAssistant: React.FC = () => {
     }
 
     if (!detectedIntent || maxScore < 0.3) {
-      addMessage("I'm not sure what you want. Try 'show low stock' or 'add item'. Type 'help' for more!", false);
+      addMessage("Hmm, not quite sure on that one – but I'm learning! Try 'show low stock' or 'help' for ideas. What's your query?", false);
       return;
     }
 
@@ -310,20 +838,19 @@ const AIAssistant: React.FC = () => {
       const addMatch = lowerQuery.match(/add\s+(\d+)\s+(.+?)\s+(?:to|in)\s+(.+)/i);
       if (addMatch) {
         const [, qty, name, cat] = addMatch;
-        const category = categories.find(c => stringSimilarity.compareTwoStrings(cat.toLowerCase(), c.name.toLowerCase()) > 0.7);
+        const category = fetchedCategories.find(c => stringSimilarity.compareTwoStrings(cat.toLowerCase(), c.name.toLowerCase()) > 0.7);
         if (category) {
           await addItem({ name, category_id: category.id, quantity: parseInt(qty), low_stock_threshold: 5 });
-          addMessage(`Success: Added ${qty} ${name} to ${category.name}!`, false);
+          addMessage(`Nailed it! Added ${qty} ${name} to ${category.name}. Stock updated live. Boom!`, false);
           loadInitialData();
           return;
         }
       }
       setConversationState({ mode: 'addingItem', addItemData: { itemName: entity || '', categoryId: null, quantity: null }, waitingFor: entity ? 'category' : 'itemName' });
       if (!entity) {
-        addMessage("What's the name of the item to add?", false);
+        addMessage("Let's add that item! What's its name?", false);
       } else {
-        addMessage(`Adding "${entity}". Select a category or type 'new' for a new one:`, false);
-        addMessage("Categories: " + categories.map(c => c.name).join(', '), false, categories.map(cat => ({
+        addMessage(`Cool, adding "${entity}". Pick a category (or 'new' for fresh one):`, false, fetchedCategories.map(cat => ({
           text: cat.name,
           action: () => handleCategorySelection(cat.id)
         })).concat([{ text: "New Category", action: () => handleCategorySelection('new') }]));
@@ -332,6 +859,17 @@ const AIAssistant: React.FC = () => {
     }
 
     switch (detectedIntent) {
+      case 'generateFullReport': {
+        const result = await generateFullSystemPDF();
+        addMessage(result.message, false, undefined, result.blob, result.filename);
+        break;
+      }
+      case 'generateReport': {
+        const result = await generateLowStockPDF();
+        addMessage(result.message, false, undefined, result.blob, result.filename);
+        break;
+      }
+      case 'sendAlert': await handleSendAlert(); break;
       case 'stockCheck': handleStockCheck(fetchedItems, entity); break;
       case 'search': handleSearch(fetchedItems, entity); break;
       case 'category': handleCategory(fetchedItems, fetchedCategories, entity); break;
@@ -346,10 +884,10 @@ const AIAssistant: React.FC = () => {
 
   const handleAddItemResponse = async (response: string) => {
     const { waitingFor, addItemData } = conversationState;
+    const stringSimilarity = (window as any).stringSimilarity;
     if (waitingFor === 'itemName') {
       setConversationState(prev => ({ ...prev, addItemData: { ...prev.addItemData, itemName: response }, waitingFor: 'category' }));
-      addMessage(`Okay, adding "${response}". Choose a category or type 'new':`, false);
-      addMessage("Available: " + categories.map(c => c.name).join(', '), false, categories.map(cat => ({
+      addMessage(`Got it – "${response}". Now, category time:`, false, categories.map(cat => ({
         text: cat.name,
         action: () => handleCategorySelection(cat.id)
       })).concat([{ text: "New Category", action: () => handleCategorySelection('new') }]));
@@ -360,21 +898,21 @@ const AIAssistant: React.FC = () => {
       } else if (response.toLowerCase().includes('new')) {
         handleCategorySelection('new');
       } else {
-        addMessage("Didn't recognize that category. Try again or select from options.", false);
+        addMessage("Category not found – double-check or pick from the buttons? Let's keep rolling!", false);
       }
     } else if (waitingFor === 'newCategoryName') {
       const newCatId = `new-${Date.now()}`; // Placeholder; replace with actual API call
       setConversationState(prev => ({ ...prev, addItemData: { ...prev.addItemData, categoryId: newCatId, newCategoryName: response }, waitingFor: 'quantity' }));
-      addMessage(`New category "${response}" created. How many units of ${addItemData?.itemName}?`, false);
+      addMessage(`Category "${response}" set. How many ${addItemData?.itemName} units are we adding?`, false);
     } else if (waitingFor === 'quantity') {
       const quantity = parseInt(response);
       if (isNaN(quantity) || quantity <= 0) {
-        addMessage("Please enter a valid positive number for quantity.", false);
+        addMessage("Quantity needs to be a positive number. Shoot me a valid one?", false);
         return;
       }
       const finalCatId = addItemData?.categoryId === 'new' ? addItemData.newCategoryName : addItemData?.categoryId;
       await addItem({ name: addItemData?.itemName || '', category_id: finalCatId || null, quantity, low_stock_threshold: 5 });
-      addMessage(`Success: Added ${quantity} units of ${addItemData?.itemName} to ${addItemData?.newCategoryName || categories.find(c => c.id === addItemData?.categoryId)?.name || 'inventory'}!`, false);
+      addMessage(`Done deal! ${quantity} x ${addItemData?.itemName} added to ${addItemData?.newCategoryName || categories.find(c => c.id === addItemData?.categoryId)?.name || 'inventory'}. Fresh stock alert! What's next on the list?`, false);
       setConversationState({ mode: 'normal' });
       loadInitialData();
     }
@@ -383,22 +921,39 @@ const AIAssistant: React.FC = () => {
   const handleCategorySelection = (catId: string) => {
     if (catId === 'new') {
       setConversationState(prev => ({ ...prev, addItemData: { ...prev.addItemData, categoryId: 'new' }, waitingFor: 'newCategoryName' }));
-      addMessage("What's the name for the new category?", false);
+      addMessage("New category – what's its name?", false);
     } else {
       setConversationState(prev => ({ ...prev, addItemData: { ...prev.addItemData, categoryId: catId }, waitingFor: 'quantity' }));
-      addMessage(`Category selected: ${categories.find(c => c.id === catId)?.name}. How many units?`, false);
+      addMessage(`Selected ${categories.find(c => c.id === catId)?.name}. Quantity?`, false);
     }
   };
 
   const handleStockCheck = (items: Item[], entity: string) => {
+    const stringSimilarity = (window as any).stringSimilarity;
     let filteredItems = entity ? items.filter(item => stringSimilarity.compareTwoStrings(entity.toLowerCase(), item.name.toLowerCase()) > 0.6) : items;
     const lowStock = filteredItems.filter(item => item.quantity <= item.low_stock_threshold);
     if (lowStock.length > 0) {
-      addMessage(`Low stock items${entity ? ` for "${entity}"` : ''}:`, false);
-      addMessage(lowStock.map(item => `• ${item.name}: ${item.quantity} (Threshold: ${item.low_stock_threshold})${item.quantity === 0 ? ' - Out of stock!' : ''}`).join('\n'), false);
-      sendLowStockEmail();
+      addMessage(`Quick stock scan${entity ? ` on "${entity}"` : ''} complete. Heads up – these are low:`, false);
+      const lowStockList = lowStock.map(item => `• ${item.name}: ${item.quantity}/${item.low_stock_threshold} ${item.quantity === 0 ? '🚨 OUT!' : item.quantity < 3 ? '⚠️ Critical' : '🟡 Low'}`).join('\n');
+      addMessage(lowStockList, false, [{
+        text: "Send Alert",
+        action: handleSendAlert
+      }, {
+        text: "PDF Report",
+        action: async () => {
+          const result = await generateLowStockPDF();
+          addMessage(result.message, false, undefined, result.blob, result.filename);
+        }
+      }, {
+        text: "Full System Report",
+        action: async () => {
+          const result = await generateFullSystemPDF();
+          addMessage(result.message, false, undefined, result.blob, result.filename);
+        }
+      }]);
+      addMessage("Options above to alert the team, snag a PDF, or go full system scan. Your call – what sparks joy (or fixes stock)?", false);
     } else {
-      addMessage(`All items${entity ? ` for "${entity}"` : ''} are sufficiently stocked.`, false);
+      addMessage(`All clear${entity ? ` for "${entity}"` : ''}! Stock's healthy. Green light on everything. Next adventure?`, false);
     }
   };
 
@@ -406,50 +961,60 @@ const AIAssistant: React.FC = () => {
     const loginLogs = auditLogs.filter(log => log.action === 'login').sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     let filteredLogs = entity ? loginLogs.filter(log => (log.username || log.full_name || '').toLowerCase().includes(entity.toLowerCase())) : loginLogs;
     if (filteredLogs.length > 0) {
-      addMessage(`Recent logins${entity ? ` for "${entity}"` : ''}:`, false);
-      addMessage(filteredLogs.slice(0, 5).map(log => `• ${log.username || log.full_name || 'Unknown'} at ${new Date(log.timestamp).toLocaleString()}`).join('\n'), false);
+      addMessage(`Login radar on${entity ? ` for "${entity}"` : ''}:`, false);
+      addMessage(filteredLogs.slice(0, 5).map(log => `• ${log.username || log.full_name || 'Unknown'} – ${new Date(log.timestamp).toLocaleString()}`).join('\n'), false);
+      addMessage("Team's logging in steadily. Security check passed! Dig deeper?", false);
     } else {
-      addMessage("No login records found.", false);
+      addMessage("No recent logins match that. Ghost mode activated? 😏 Let's pivot.", false);
     }
   };
 
   const handleRequests = (requests: Request[], entity: string) => {
     if (user?.role !== 'superadmin') {
-      addMessage("Access denied: Request view is for Super Admins only.", false);
+      addMessage("Super Admin eyes only for requests. Share deets if you need a hand crafting one!", false);
       return;
     }
     let filteredRequests = entity ? requests.filter(req => req.project_name.toLowerCase().includes(entity.toLowerCase()) || req.status.toLowerCase().includes(entity.toLowerCase())) : requests;
     if (filteredRequests.length > 0) {
-      addMessage(`Requests${entity ? ` matching "${entity}"` : ''}:`, false);
-      addMessage(filteredRequests.map(req => `• ID ${req.id} (${req.status}): ${req.project_name} by ${req.created_by} on ${new Date(req.created_at).toLocaleString()}`).join('\n'), false);
+      addMessage(`Request roundup${entity ? ` for "${entity}"` : ''}:`, false);
+      addMessage(filteredRequests.map(req => `• #${req.id} | ${req.status.toUpperCase()} | ${req.project_name} (${req.created_by}, ${new Date(req.created_at).toLocaleDateString()})`).join('\n'), false);
+      addMessage("All queued up. Approve, reject, or create? Your command.", false);
     } else {
-      addMessage("No requests found.", false);
+      addMessage("Requests drawer empty for that query. Time to start a new one?", false);
     }
   };
 
   const handleSearch = (items: Item[], entity: string) => {
+    const stringSimilarity = (window as any).stringSimilarity;
     const matchingItems = entity ? items.filter(item => stringSimilarity.compareTwoStrings(entity.toLowerCase(), item.name.toLowerCase()) > 0.6 || stringSimilarity.compareTwoStrings(entity.toLowerCase(), (item.description || '').toLowerCase()) > 0.6) : items.slice(0, 10);
     if (matchingItems.length > 0) {
-      addMessage(`Items${entity ? ` matching "${entity}"` : ''}:`, false);
-      addMessage(matchingItems.map(item => `• ${item.name}: ${item.quantity} ${item.quantity <= item.low_stock_threshold ? (item.quantity === 0 ? '- Out' : '- Low') : ''}`).join('\n'), false);
+      addMessage(`Search results for "${entity}":`, false);
+      addMessage(matchingItems.map(item => `• ${item.name}: ${item.quantity} avail${item.quantity <= item.low_stock_threshold ? (item.quantity === 0 ? ' – zilch!' : ' – low vibes') : ''}`).join('\n'), false);
+      addMessage("Spot on? Or refine the hunt?", false);
     } else {
-      addMessage("No matching items found.", false);
+      addMessage(`No hits on "${entity}". Broaden the net or try synonyms? I'm game.`, false);
     }
   };
 
   const handleCategory = (items: Item[], categories: any[], entity: string) => {
+    const stringSimilarity = (window as any).stringSimilarity;
     if (!entity) {
-      addMessage("Categories:", false);
+      addMessage("Category carousel:", false);
       addMessage(categories.map(cat => `• ${cat.name} (${items.filter(i => i.category_id === cat.id).length} items)`).join('\n'), false);
       return;
     }
     const cat = categories.find(c => stringSimilarity.compareTwoStrings(entity.toLowerCase(), c.name.toLowerCase()) > 0.7);
     if (cat) {
       const catItems = items.filter(item => item.category_id === cat.id);
-      addMessage(`Items in ${cat.name}:`, false);
-      addMessage(catItems.length > 0 ? catItems.map(item => `• ${item.name}: ${item.quantity} ${item.quantity <= item.low_stock_threshold ? (item.quantity === 0 ? '- Out' : '- Low') : ''}`).join('\n') : "No items in this category.", false);
+      addMessage(`Spotlight on ${cat.name}:`, false);
+      if (catItems.length > 0) {
+        addMessage(catItems.map(item => `• ${item.name}: ${item.quantity}${item.quantity <= item.low_stock_threshold ? (item.quantity === 0 ? ' – empty!' : ' – low') : ''}`).join('\n'), false);
+      } else {
+        addMessage("Category's a blank canvas. Add some flair?", false);
+      }
+      addMessage("Deep dive done. Explore another?", false);
     } else {
-      addMessage(`Category "${entity}" not found. Available categories: ${categories.map(c => c.name).join(', ')}`, false);
+      addMessage(`"${entity}" not in the lineup. Categories: ${categories.map(c => c.name).join(', ')}. Choose your fighter!`, false);
     }
   };
 
@@ -461,10 +1026,11 @@ const AIAssistant: React.FC = () => {
     let users = Object.entries(activity).sort(([, a], [, b]) => b - a);
     if (entity) users = users.filter(([name]) => name.toLowerCase().includes(entity.toLowerCase()));
     if (users.length > 0) {
-      addMessage(`User activity${entity ? ` for "${entity}"` : ''}:`, false);
-      addMessage(users.slice(0, 5).map(([name, count]) => `• ${name}: ${count} items checked out`).join('\n'), false);
+      addMessage(`Activity leaders${entity ? ` near "${entity}"` : ''}:`, false);
+      addMessage(users.slice(0, 5).map(([name, count]) => `• ${name}: ${count} items out`).join('\n'), false);
+      addMessage("Who's hustling! Track more or switch gears?", false);
     } else {
-      addMessage("No user activity found.", false);
+      addMessage("Activity log's quiet. Perfect storm for planning?", false);
     }
   };
 
@@ -472,22 +1038,39 @@ const AIAssistant: React.FC = () => {
     const total = items.reduce((sum, item) => sum + item.quantity, 0);
     const low = items.filter(item => item.quantity <= item.low_stock_threshold).length;
     const recent = itemsOut.filter(item => new Date(item.date_time) >= new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length;
-    addMessage("Inventory Summary (Real-time):", false);
-    addMessage(`• Total items: ${total}\n• Unique items: ${items.length}\n• Low stock: ${low}\n• Recent checkouts (week): ${recent}\n• Categories: ${categories.length}`, false);
+    addMessage("Inventory snapshot – crisp and current:", false);
+    addMessage(`• Units total: ${total.toLocaleString()}\n• Item types: ${items.length}\n• Low flags: ${low} ${low > 0 ? '⚠️' : '✅'}\n• Weekly moves: ${recent}\n• Category count: ${categories.length}`, false);
     if (entity.includes('detail')) {
-      const byCat = categories.map(cat => `• ${cat.name}: ${items.filter(i => i.category_id === cat.id).reduce((sum, i) => sum + i.quantity, 0)}`);
-      addMessage("Category breakdown:\n" + byCat.join('\n'), false);
+      const byCat = categories.map(cat => `• ${cat.name}: ${items.filter(i => i.category_id === cat.id).reduce((sum, i) => sum + i.quantity, 0)} units`);
+      addMessage("Category split:\n" + byCat.join('\n'), false);
     }
+    addMessage("Solid overview! Zoom in on anything?", false);
   };
 
   const handleRecommendations = (items: Item[], entity: string) => {
     let critical = items.filter(item => item.quantity <= item.low_stock_threshold);
     if (entity) critical = critical.filter(item => item.name.toLowerCase().includes(entity.toLowerCase()));
     if (critical.length > 0) {
-      addMessage("Restock Recommendations:", false);
-      addMessage(critical.map(item => `• ${item.name}: Add at least ${item.low_stock_threshold - item.quantity + 5} more`).join('\n'), false);
+      addMessage("Restock radar pinging:", false);
+      addMessage(critical.map(item => `• ${item.name}: Grab ${item.low_stock_threshold - item.quantity + 10} more (safety net included)`).join('\n'), false);
+      addMessage("Smart buys ahead. PDF this or alert the crew?", false, [{
+        text: "PDF Report",
+        action: async () => {
+          const result = await generateLowStockPDF();
+          addMessage(result.message, false, undefined, result.blob, result.filename);
+        }
+      }, {
+        text: "Send Alert",
+        action: handleSendAlert
+      }, {
+        text: "Full System Report",
+        action: async () => {
+          const result = await generateFullSystemPDF();
+          addMessage(result.message, false, undefined, result.blob, result.filename);
+        }
+      }]);
     } else {
-      addMessage("No restocking needed at this time.", false);
+      addMessage("Stock's in sweet spot – no buys urgent. Celebrate with a dashboard dance? 🎉", false);
     }
   };
 
@@ -495,10 +1078,11 @@ const AIAssistant: React.FC = () => {
     let recent = itemsOut.sort((a, b) => new Date(b.date_time).getTime() - new Date(a.date_time).getTime()).slice(0, 10);
     if (entity) recent = recent.filter(item => item.person_name.toLowerCase().includes(entity.toLowerCase()) || item.item_name.toLowerCase().includes(entity.toLowerCase()));
     if (recent.length > 0) {
-      addMessage("Recent Activity:", false);
-      addMessage(recent.map(item => `• ${item.person_name} checked out ${item.quantity} ${item.item_name} on ${new Date(item.date_time).toLocaleString()}`).join('\n'), false);
+      addMessage("Fresh tracks:", false);
+      addMessage(recent.map(item => `• ${item.person_name} snagged ${item.quantity} ${item.item_name} (${new Date(item.date_time).toLocaleString()})`).join('\n'), false);
+      addMessage("Action log updated. History lesson over – future plans?", false);
     } else {
-      addMessage("No recent activity found.", false);
+      addMessage("No fresh action. Calm before the storm? Let's stir something up.", false);
     }
   };
 
@@ -513,7 +1097,7 @@ const AIAssistant: React.FC = () => {
       <header className="bg-white shadow-sm p-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <Bot className="h-6 w-6 mr-2 text-indigo-600" />
+            <Bot className="h-6 w-6 mr-2 text-gray-600" />
             Inventory AI Assistant
           </h1>
           <Button variant="ghost" onClick={() => setShowHelpPanel(!showHelpPanel)} className="flex items-center text-gray-600 hover:text-gray-900">
@@ -524,33 +1108,33 @@ const AIAssistant: React.FC = () => {
       <main className="flex-1 overflow-y-auto p-4">
         <div className="max-w-4xl mx-auto space-y-4">
           {systemStatus && (
-            <Card className="bg-indigo-50 border-indigo-200">
+            <Card className="bg-gray-50 border-gray-200">
               <CardContent className="p-4">
                 <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold text-indigo-800 flex items-center">
-                    <Info className="h-4 w-4 mr-1" /> System Status (Real-time)
+                  <h3 className="font-semibold text-gray-800 flex items-center">
+                    <Info className="h-4 w-4 mr-1" /> System Status (Live)
                   </h3>
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                  <div className="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-                    <p className="text-sm text-indigo-600">Total Items</p>
-                    <p className="text-xl font-bold text-indigo-900">{systemStatus.totalItems}</p>
+                  <div className="bg-white p-3 rounded-md shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-600">Total Items</p>
+                    <p className="text-xl font-bold text-gray-900">{systemStatus.totalItems}</p>
                   </div>
-                  <div className="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-                    <p className="text-sm text-indigo-600">Low Stock</p>
+                  <div className="bg-white p-3 rounded-md shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-600">Low Stock</p>
                     <p className={`text-xl font-bold ${systemStatus.lowStockItems > 0 ? 'text-amber-600' : 'text-green-600'}`}>{systemStatus.lowStockItems}</p>
                   </div>
-                  <div className="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-                    <p className="text-sm text-indigo-600">Categories</p>
-                    <p className="text-xl font-bold text-indigo-900">{systemStatus.categoriesCount}</p>
+                  <div className="bg-white p-3 rounded-md shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-600">Categories</p>
+                    <p className="text-xl font-bold text-gray-900">{systemStatus.categoriesCount}</p>
                   </div>
-                  <div className="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-                    <p className="text-sm text-indigo-600">Recent Checkouts</p>
-                    <p className="text-xl font-bold text-indigo-900">{systemStatus.recentActivity}</p>
+                  <div className="bg-white p-3 rounded-md shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-600">Recent Checkouts</p>
+                    <p className="text-xl font-bold text-gray-900">{systemStatus.recentActivity}</p>
                   </div>
-                  <div className="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-                    <p className="text-sm text-indigo-600">Last Login</p>
-                    <p className="text-sm text-indigo-900 flex items-center">
+                  <div className="bg-white p-3 rounded-md shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-600">Last Login</p>
+                    <p className="text-sm text-gray-900 flex items-center">
                       {systemStatus.lastLogin ? (
                         <>
                           <User className="h-3 w-3 mr-1" />
@@ -566,25 +1150,25 @@ const AIAssistant: React.FC = () => {
             </Card>
           )}
           {showHelpPanel && (
-            <Card className="bg-indigo-50 border-indigo-200 animate-fade-in">
+            <Card className="bg-gray-50 border-gray-200 animate-in slide-in-from-top-2 duration-300">
               <CardContent className="p-4">
                 <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-semibold text-indigo-800 flex items-center">
-                    <HelpCircle className="h-4 w-4 mr-1" /> Quick Help
+                  <h3 className="font-semibold text-gray-800 flex items-center">
+                    <HelpCircle className="h-4 w-4 mr-1" /> Quick Commands
                   </h3>
                   <Button variant="ghost" size="icon" onClick={() => setShowHelpPanel(false)}>
-                    <X className="h-4 w-4 text-indigo-800" />
+                    <X className="h-4 w-4 text-gray-800" />
                   </Button>
                 </div>
-                <p className="text-sm text-indigo-700 mb-3">Click to try these commands:</p>
+                <p className="text-sm text-gray-700 mb-3">Spark a convo with these – click to load:</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {generateHelpTopics().map((topic, index) => (
-                    <Card key={index} className="bg-white border-indigo-100">
+                    <Card key={index} className="bg-white border-gray-100 hover:shadow-md transition-shadow">
                       <CardContent className="p-3">
-                        <p className="font-medium text-indigo-800">{topic.topic}</p>
-                        <p className="text-xs text-indigo-600 mb-2">{topic.description}</p>
-                        <Button variant="outline" className="w-full text-indigo-700 border-indigo-200 hover:bg-indigo-100" onClick={() => insertHelpTopic(topic.command)}>
-                          Try: "{topic.command}"
+                        <p className="font-medium text-gray-800">{topic.topic}</p>
+                        <p className="text-xs text-gray-600 mb-2">{topic.description}</p>
+                        <Button variant="outline" className="w-full text-gray-700 border-gray-200 hover:bg-gray-50" onClick={() => insertHelpTopic(topic.command)}>
+                          "{topic.command}"
                         </Button>
                       </CardContent>
                     </Card>
@@ -593,43 +1177,61 @@ const AIAssistant: React.FC = () => {
               </CardContent>
             </Card>
           )}
+          {messages.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              <Bot className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p className="text-lg">Ready when you are! Type a query like "show low stock" to kick things off.</p>
+            </div>
+          )}
           {messages.map(message => (
-            <div key={message.id} className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}>
+            <div key={message.id} className={`flex ${message.isUser ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-200`}>
               <div className="flex items-start space-x-2 max-w-[80%]">
                 {!message.isUser && (
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-indigo-100 text-indigo-600">AI</AvatarFallback>
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    <AvatarFallback className="bg-gray-100 text-gray-600">AI</AvatarFallback>
                   </Avatar>
                 )}
-                <Card className={`${message.isUser ? 'bg-indigo-600 text-white' : 'bg-white border-gray-200'}`}>
+                <Card className={`flex-1 ${message.isUser ? 'bg-gray-600 text-white' : 'bg-white border-gray-200 shadow-sm'}`}>
                   <CardContent className="p-3">
-                    <p className="whitespace-pre-line text-sm">{message.text}</p>
+                    <p className="whitespace-pre-line text-sm leading-relaxed">{message.text}</p>
                     {message.options && (
-                      <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         {message.options.map((opt, idx) => (
-                          <Button key={idx} size="sm" variant={message.isUser ? "secondary" : "outline"} onClick={opt.action}>
+                          <Button key={idx} size="sm" variant={message.isUser ? "secondary" : "outline"} onClick={opt.action} className="text-xs px-3 py-1">
                             {opt.text}
                           </Button>
                         ))}
                       </div>
                     )}
-                    <p className={`text-xs mt-1 ${message.isUser ? 'text-indigo-200' : 'text-gray-500'}`}>
+                    {message.downloadBlob && (
+                      <div className="mt-3">
+                        <Button 
+                          variant="outline" 
+                          onClick={() => handleDownload(message.downloadBlob!, message.downloadFilename!)}
+                          className="w-full text-gray-700 border-gray-200 hover:bg-gray-50"
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Download PDF
+                        </Button>
+                      </div>
+                    )}
+                    <p className={`text-xs mt-2 ${message.isUser ? 'text-gray-200' : 'text-gray-500'}`}>
                       {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </CardContent>
                 </Card>
                 {message.isUser && (
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-indigo-100 text-indigo-600">U</AvatarFallback>
+                  <Avatar className="h-8 w-8 flex-shrink-0">
+                    <AvatarFallback className="bg-gray-100 text-gray-600">U</AvatarFallback>
                   </Avatar>
                 )}
               </div>
             </div>
           ))}
           {loading && (
-            <div className="flex items-center text-gray-500">
-              <MessageSquare className="h-4 w-4 mr-2 animate-pulse" />
-              <span>Processing...</span>
+            <div className="flex items-center justify-start text-gray-500 animate-pulse">
+              <MessageSquare className="h-4 w-4 mr-2" />
+              <span className="text-sm">Thinking fast...</span>
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -640,18 +1242,20 @@ const AIAssistant: React.FC = () => {
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center space-x-2">
             <Input
               ref={inputRef}
-              placeholder="Ask me anything about your inventory..."
-              className="flex-1 focus:ring-indigo-500"
+              placeholder="What's on your mind? (e.g., 'show low stock' or 'generate full system report')"
+              className="flex-1 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 transition-colors"
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={loading}
             />
-            <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700" disabled={loading || !input.trim()}>
+            <Button type="submit" className="bg-gray-600 hover:bg-gray-700 disabled:opacity-50" disabled={loading || !input.trim()}>
               <Send className="h-4 w-4" />
               <span className="sr-only">Send</span>
             </Button>
           </form>
-          <p className="text-xs text-gray-500 mt-2 text-center">Try: "Show low stock" or "Add 10 items to a category"</p>
+          {messages.length > 0 && (
+            <p className="text-xs text-gray-500 mt-2 text-center italic">Pro tip: Say "help" for command ideas.</p>
+          )}
         </div>
       </footer>
     </div>

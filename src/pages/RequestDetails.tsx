@@ -25,6 +25,14 @@ interface Approval {
   approved_at: string;
 }
 
+interface Rejection {
+  id: number;
+  request_id: number;
+  rejector_name: string;
+  reason: string;
+  created_at: string;
+}
+
 interface RequestDetails {
   id: number;
   created_by: string;
@@ -41,6 +49,7 @@ interface RequestDetails {
   updated_at: string;
   items: RequestItem[];
   approvals: Approval[];
+  rejections?: Rejection[];
 }
 
 interface EditableItem {
@@ -360,7 +369,7 @@ const RequestDetails: React.FC = () => {
             </div>
           </section>
 
-          {/* Items and Approvals - Screen */}
+          {/* Items and History - Screen */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <ItemsTable
               items={editing ? selectedItems : request.items}
@@ -371,7 +380,11 @@ const RequestDetails: React.FC = () => {
               onAddRow={addItemRow}
               isEditable={isEditable}
             />
-            <ApprovalsSection approvals={request.approvals} releaseBy={request.release_by} />
+            <HistorySection 
+              approvals={request.approvals} 
+              rejections={request.rejections} 
+              releaseBy={request.release_by} 
+            />
           </div>
         </div>
       </div>
@@ -473,9 +486,9 @@ const RequestDetails: React.FC = () => {
             </div>
           </section>
 
-          {/* Section 3: Approvals */}
+          {/* Section 3: History */}
           <section className="mb-4">
-            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Approvals</h2>
+            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">History</h2>
             <div className="border border-gray-300 rounded p-2 bg-gray-50 text-xs">
               {request.release_by && (
                 <div className="mb-2 pb-1 border-b border-gray-200">
@@ -483,16 +496,32 @@ const RequestDetails: React.FC = () => {
                   <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(request.updated_at).toLocaleString()}</span></div>
                 </div>
               )}
-              {request.approvals.length > 0 ? (
-                request.approvals.map((approval, index) => (
-                  <div key={approval.id} className={`pb-2 ${index < request.approvals.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
-                    <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1">{approval.approver_name}</span></div>
-                    <div className="flex mb-0.5 text-gray-700"><span className="w-16 font-medium">Signature:</span><span className="ml-1 italic">{approval.signature}</span></div>
-                    <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(approval.approved_at).toLocaleString()}</span></div>
-                  </div>
-                ))
-              ) : (
-                <p className="italic text-gray-500 text-center py-2 font-serif">No approvals recorded yet</p>
+              {request.approvals.length > 0 && (
+                <div className="mb-2 pb-1 border-b border-gray-200">
+                  <h3 className="font-bold text-blue-900 mb-1">Approvals</h3>
+                  {request.approvals.map((approval, index) => (
+                    <div key={approval.id} className={`pb-2 ${index < request.approvals.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
+                      <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1">{approval.approver_name}</span></div>
+                      <div className="flex mb-0.5 text-gray-700"><span className="w-16 font-medium">Signature:</span><span className="ml-1 italic">{approval.signature}</span></div>
+                      <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(approval.approved_at).toLocaleString()}</span></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {request.rejections && request.rejections.length > 0 ? (
+                <div className="mb-2 pb-1 border-b border-gray-200">
+                  <h3 className="font-bold text-red-900 mb-1">Rejections</h3>
+                  {request.rejections.map((rejection, index) => (
+                    <div key={rejection.id} className={`pb-2 ${index < request.rejections!.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
+                      <div className="flex mb-0.5 font-bold text-red-900"><span className="w-16">Rejector:</span><span className="ml-1">{rejection.rejector_name}</span></div>
+                      <div className="flex mb-0.5 text-red-700"><span className="w-16 font-medium">Reason:</span><span className="ml-1 italic">{rejection.reason}</span></div>
+                      <div className="flex text-red-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(rejection.created_at).toLocaleString()}</span></div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {(!request.approvals.length && (!request.rejections || request.rejections.length === 0)) && (
+                <p className="italic text-gray-500 text-center py-2 font-serif">No history recorded yet</p>
               )}
             </div>
           </section>
@@ -862,30 +891,47 @@ const ItemRow: React.FC<ItemRowProps> = ({
   </tr>
 );
 
-interface ApprovalsSectionProps {
+interface HistorySectionProps {
   approvals: any[];
+  rejections?: any[];
   releaseBy?: string | null;
 }
 
-const ApprovalsSection: React.FC<ApprovalsSectionProps> = ({ approvals, releaseBy }) => (
+const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, releaseBy }) => (
   <div>
-    <h2 className="text-lg font-semibold text-gray-800 mb-4">Approvals</h2>
+    <h2 className="text-lg font-semibold text-gray-800 mb-4">History</h2>
     <div className="bg-gray-50 rounded-lg shadow-sm border border-gray-100 p-4">
       {releaseBy && (
         <div className="mb-3 pb-3 border-b border-gray-200">
           <p className="text-sm font-medium text-gray-800">Issuer: {releaseBy}</p>
         </div>
       )}
-      {approvals.length > 0 ? (
-        approvals.map((approval) => (
-          <div key={approval.id} className="border-l-4 border-blue-500 pl-4 py-2 mb-3">
-            <p className="text-sm font-medium text-gray-800">{approval.approver_name}</p>
-            <p className="text-sm text-gray-600">Signature: {approval.signature}</p>
-            <p className="text-sm text-gray-600">Approved: {new Date(approval.approved_at).toLocaleString()}</p>
-          </div>
-        ))
-      ) : (
-        <p className="text-gray-600 italic text-center py-4">No approvals recorded yet</p>
+      {approvals.length > 0 && (
+        <div className="mb-3 pb-3 border-b border-gray-200">
+          <h3 className="text-sm font-semibold text-blue-800 mb-2">Approvals</h3>
+          {approvals.map((approval) => (
+            <div key={approval.id} className="border-l-4 border-blue-500 pl-4 py-2 mb-3 bg-blue-50 rounded">
+              <p className="text-sm font-medium text-gray-800">{approval.approver_name}</p>
+              <p className="text-sm text-gray-600">Signature: {approval.signature}</p>
+              <p className="text-sm text-gray-600">Approved: {new Date(approval.approved_at).toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {rejections && rejections.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-red-800 mb-2">Rejections</h3>
+          {rejections.map((rejection) => (
+            <div key={rejection.id} className="border-l-4 border-red-500 pl-4 py-2 mb-3 bg-red-50 rounded">
+              <p className="text-sm font-medium text-red-800">Rejected by: {rejection.rejector_name}</p>
+              <p className="text-sm text-red-600"><strong>Reason:</strong> {rejection.reason}</p>
+              <p className="text-sm text-red-600">Rejected: {new Date(rejection.created_at).toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {(!approvals.length && (!rejections || rejections.length === 0)) && (
+        <p className="text-gray-600 italic text-center py-4">No history recorded yet</p>
       )}
     </div>
   </div>
