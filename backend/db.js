@@ -1,4 +1,4 @@
-// Updated db.js with enhanced error handling for graceful table creation
+// Updated db.js with selected_approver_id support
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -210,11 +210,26 @@ export async function initDB() {
         deployment_type VARCHAR(100),
         release_by VARCHAR(255),
         received_by VARCHAR(255),
+        selected_approver_id INTEGER REFERENCES users(id),
         status VARCHAR(50) DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
     `, 'requests');
+
+    // Migrate selected_approver_id if needed
+    try {
+      await pool.query(`
+        ALTER TABLE requests ADD COLUMN IF NOT EXISTS selected_approver_id INTEGER REFERENCES users(id);
+      `);
+      console.log('Requests selected_approver_id migration completed.');
+    } catch (alterError) {
+      if (!alterError.message.includes('already exists')) {
+        console.warn('Warning during requests schema migration:', alterError.message);
+      } else {
+        console.log('Requests migration skipped (already applied).');
+      }
+    }
 
     // Request items table
     await createTableIfNotExists(`
@@ -333,6 +348,25 @@ export async function getUsers() {
     return result.rows;
   } catch (error) {
     console.error('Error fetching users:', error.stack);
+    throw error;
+  }
+}
+
+// New function to get approvers
+export async function getApprovers() {
+  try {
+    const result = await pool.query(`
+      SELECT id, first_name, last_name 
+      FROM users 
+      WHERE role = 'approver' 
+      ORDER BY last_name ASC, first_name ASC
+    `);
+    return result.rows.map(row => ({
+      id: row.id,
+      fullName: `${row.first_name} ${row.last_name}`.trim()
+    }));
+  } catch (error) {
+    console.error('Error fetching approvers:', error.stack);
     throw error;
   }
 }
@@ -1021,15 +1055,15 @@ export async function getDashboardStats() {
   }
 }
 
-// Requests functions with audit logging
-export async function createRequest(requestData, userId, ip) {
+// Updated Requests functions with selected_approver_id and audit logging
+export async function createRequest(requestData, selectedApproverId, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, releaseBy, receivedBy, items } = requestData;
     const requestResult = await client.query(
-      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP) RETURNING *',
-      [createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, releaseBy || null, receivedBy || null, 'pending']
+      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, selected_approver_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP) RETURNING *',
+      [createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, releaseBy || null, receivedBy || null, selectedApproverId, 'pending']
     );
     const requestId = requestResult.rows[0].id;
     for (const item of items) {
@@ -1043,7 +1077,7 @@ export async function createRequest(requestData, userId, ip) {
     }
 
     // Log audit
-    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId });
+    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_id: selectedApproverId });
 
     await client.query('COMMIT');
     return requestResult.rows[0];
@@ -1056,17 +1090,29 @@ export async function createRequest(requestData, userId, ip) {
   }
 }
 
-export async function getRequests() {
+export async function getRequests(userRole, userId) {
   try {
-    const result = await pool.query(`
+    let query = `
       SELECT r.*, 
              (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS reject_reason,
-             COUNT(ri.id) AS item_count
+             COUNT(ri.id) AS item_count,
+             COALESCE(u.first_name || ' ' || u.last_name, 'Unassigned') AS approver_name
       FROM requests r
       LEFT JOIN request_items ri ON r.id = ri.request_id
-      GROUP BY r.id, (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1)
-      ORDER BY r.created_at DESC
-    `);
+      LEFT JOIN users u ON r.selected_approver_id = u.id
+    `;
+    let params = [];
+    let whereClause = ' GROUP BY r.id, reject_reason, u.first_name, u.last_name';
+    let orderBy = ' ORDER BY r.created_at DESC';
+
+    if (userRole === 'approver') {
+      query += ` WHERE (r.status != 'pending' OR (r.status = 'pending' AND r.selected_approver_id = $1))`;
+      params.push(userId);
+    }
+
+    query += whereClause + orderBy;
+
+    const result = await pool.query(query, params);
     return result.rows;
   } catch (error) {
     console.error('Error fetching requests:', error.stack);

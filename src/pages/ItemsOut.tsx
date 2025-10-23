@@ -119,7 +119,7 @@ const ItemsOut: React.FC = () => {
 
   const exportToCSV = async () => {
     try {
-      const headers = ["Request ID", "Project Name", "Created By", "Team Leader", "Deployment Type", "Item", "Quantity Requested", "Quantity Received", "Approved By", "Date Finalized"];
+      const headers = ["Request ID", "Project Name", "Created By", "Team Leader", "Project Type", "Item", "Quantity Requested", "Quantity Received", "Approved By", "Date Finalized"];
       const rows = [];
       
       for (const request of filteredRequests as Request[]) {
@@ -252,7 +252,7 @@ const ItemsOut: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team Leader</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deployment Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approved By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Finalized</th>

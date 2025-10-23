@@ -1,4 +1,4 @@
-// Updated server.js (key changes: auth middleware, user routes, updated login, enhanced send-low-stock-alert)
+// Updated server.js with approvers endpoint and filtered requests
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -15,7 +15,8 @@ import {
   updateRequest, rejectRequest, getUserByUsername, insertAuditLog, getAuditLogs,
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
   initDB, getSettings, updateSetting,
-  getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser
+  getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser,
+  getApprovers
 } from './db.js';
 import pool from './db.js';
 import { sendLowStockAlert } from './emailService.js';
@@ -179,6 +180,17 @@ app.get('/api/audit-logs', authenticateToken, async (req, res) => {
     res.json(logs);
   } catch (error) {
     console.error('Error fetching audit logs:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// New endpoint for approvers
+app.get('/api/users/approvers', authenticateToken, async (req, res) => {
+  try {
+    const approvers = await getApprovers();
+    res.json(approvers);
+  } catch (error) {
+    console.error('Error fetching approvers:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });
@@ -546,11 +558,15 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Requests Routes (add auth, role checks if needed)
+// Updated Requests Routes (add auth, role checks if needed)
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
+    const { selectedApproverId, ...requestData } = req.body;
+    if (!selectedApproverId) {
+      return res.status(400).json({ error: 'Selected approver is required' });
+    }
     const ip = getClientIp(req);
-    const request = await createRequest(req.body, req.user.id, ip);
+    const request = await createRequest(requestData, parseInt(selectedApproverId), req.user.id, ip);
     res.status(201).json(request);
   } catch (error) {
     console.error('Error creating request:', error.stack);
@@ -560,7 +576,7 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
 
 app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
-    const requests = await getRequests();
+    const requests = await getRequests(req.user.role, req.user.id);
     res.json(requests);
   } catch (error) {
     console.error('Error fetching requests:', error.stack);

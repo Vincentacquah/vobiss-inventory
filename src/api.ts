@@ -81,6 +81,7 @@ interface Request {
   updated_at: string;
   item_count: number;
   reject_reason?: string | null; // Added for quick access in lists
+  approver_name?: string;
 }
 
 interface RequestDetails extends Request {
@@ -150,6 +151,11 @@ interface Setting {
   value: string;
   description?: string;
   updated_at: string;
+}
+
+interface Approver {
+  id: number;
+  fullName: string;
 }
 
 // Helper function to fetch public IP
@@ -287,6 +293,20 @@ export const updateUserRole = async (userId: number, role: string): Promise<User
   } catch (error) {
     console.error('Error updating role:', error);
     throw error;
+  }
+};
+
+export const getApprovers = async (): Promise<Approver[]> => {
+  try {
+    const response = await apiFetch(`${API_URL}/users/approvers`, {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching approvers:', error);
+    return [];
   }
 };
 
@@ -578,14 +598,14 @@ export const createRequest = async (requestData: {
   releaseBy: string | null;
   receivedBy: string | null;
   items: { name: string; requested: number }[];
-}): Promise<Request> => {
+}, selectedApproverId: number): Promise<Request> => {
   try {
     const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(requestData),
+      body: JSON.stringify({ ...requestData, selectedApproverId }),
     });
     return await response.json();
   } catch (error) {

@@ -1,6 +1,7 @@
+// Updated RequestForms.tsx with approver selection
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Clock, CheckCircle, XCircle } from 'lucide-react';
-import { getRequests, getItems, createRequest } from '../api';
+import { Plus, Search, Clock, CheckCircle, XCircle, User } from 'lucide-react';
+import { getRequests, getItems, createRequest, getApprovers } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,12 +24,18 @@ interface Request {
   created_at: string;
   updated_at: string;
   item_count: number;
+  approver_name?: string;
 }
 
 interface Item {
   id: number;
   name: string;
   quantity: number;
+}
+
+interface Approver {
+  id: number;
+  fullName: string;
 }
 
 const RequestForms: React.FC = () => {
@@ -39,11 +46,13 @@ const RequestForms: React.FC = () => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Item[]>([]);
+  const [approvers, setApprovers] = useState<Approver[]>([]);
   const { toast } = useToast();
 
   useEffect(() => {
     loadRequests();
     loadItems();
+    loadApprovers();
   }, []);
 
   useEffect(() => {
@@ -81,6 +90,20 @@ const RequestForms: React.FC = () => {
     }
   };
 
+  const loadApprovers = async () => {
+    try {
+      const data = await getApprovers();
+      setApprovers(data);
+    } catch (error) {
+      console.error('Error loading approvers:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load approvers",
+        variant: "destructive"
+      });
+    }
+  };
+
   const filterRequests = () => {
     let filtered = allRequests.filter(request => request.status === activeTab);
     if (searchTerm.trim()) {
@@ -88,7 +111,8 @@ const RequestForms: React.FC = () => {
         (request.team_leader_name && request.team_leader_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (request.team_leader_phone && request.team_leader_phone.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (request.project_name && request.project_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (request.created_by && request.created_by.toLowerCase().includes(searchTerm.toLowerCase()))
+        (request.created_by && request.created_by.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (request.approver_name && request.approver_name.toLowerCase().includes(searchTerm.toLowerCase()))
       );
     }
     setFilteredRequests(filtered);
@@ -104,6 +128,7 @@ const RequestForms: React.FC = () => {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
+    selectedApproverId: number;
   }) => {
     try {
       await createRequest({
@@ -117,7 +142,7 @@ const RequestForms: React.FC = () => {
         receivedBy: formData.receivedBy,
         deployment: formData.deployment,
         items: formData.items,
-      });
+      }, formData.selectedApproverId);
       setIsFormOpen(false);
       toast({
         title: "Success",
@@ -189,7 +214,7 @@ const RequestForms: React.FC = () => {
             <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900">REQUEST FORM FOR MATERIALS</h2>
           </div>
-          <RequestForm onSave={handleCreateRequest} onCancel={() => setIsFormOpen(false)} items={items} />
+          <RequestForm onSave={handleCreateRequest} onCancel={() => setIsFormOpen(false)} items={items} approvers={approvers} />
         </div>
       )}
 
@@ -200,7 +225,7 @@ const RequestForms: React.FC = () => {
             <Search className="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <Input
               type="text"
-              placeholder="Search by creator, team leader or project..."
+              placeholder="Search by creator, team leader, project or approver..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2"
@@ -227,6 +252,7 @@ const RequestForms: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team Leader</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assigned Approver</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Release By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Received By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
@@ -254,6 +280,12 @@ const RequestForms: React.FC = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                         <div className="text-sm text-gray-900">{request.created_by}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                        <div className="text-sm font-medium text-gray-900 flex items-center">
+                          <User className="h-3 w-3 mr-1 text-gray-500" />
+                          {request.approver_name}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                         <div className="text-sm text-gray-900">{request.release_by || 'N/A'}</div>
@@ -306,12 +338,14 @@ interface RequestFormProps {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
+    selectedApproverId: number;
   }) => void;
   onCancel: () => void;
   items: Item[];
+  approvers: Approver[];
 }
 
-const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) => {
+const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, approvers }) => {
   const [formData, setFormData] = useState({
     createdBy: '',
     teamLeaderName: '',
@@ -321,6 +355,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
     location: '',
     receivedBy: '',
     deployment: 'Deployment' as 'Deployment' | 'Maintenance',
+    selectedApproverId: 0,
   });
   const [selectedItems, setSelectedItems] = useState<{ name: string; requested: string }[]>([{ name: '', requested: '' }]);
   const [submitting, setSubmitting] = useState(false);
@@ -333,6 +368,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
   const ispNameRef = useRef<HTMLInputElement>(null);
   const locationRef = useRef<HTMLInputElement>(null);
   const receivedByRef = useRef<HTMLInputElement>(null);
+  const approverRef = useRef<HTMLSelectElement>(null);
   const deploymentRefs = useRef<(HTMLInputElement | null)[]>([]);
   const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
   const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -367,7 +403,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
     e.preventDefault();
     setSubmitting(true);
 
-    if (!formData.createdBy || !formData.teamLeaderName || !formData.projectName || !formData.location || !formData.receivedBy) {
+    if (!formData.createdBy || !formData.teamLeaderName || !formData.projectName || !formData.location || !formData.receivedBy || !formData.selectedApproverId) {
       alert('Please fill all required fields');
       setSubmitting(false);
       return;
@@ -393,6 +429,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
       location: '',
       receivedBy: '',
       deployment: 'Deployment' as 'Deployment' | 'Maintenance',
+      selectedApproverId: 0,
     });
     setSelectedItems([{ name: '', requested: '' }]);
     setSubmitting(false);
@@ -414,7 +451,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
           />
         </div>
         <div className="space-y-3">
-          <label className="block text-sm font-semibold text-gray-700">Team Leader Name *</label>
+          <label className="block text-sm font-semibold text-gray-700">Team LeaderName *</label>
           <Input
             ref={teamLeaderNameRef}
             value={formData.teamLeaderName}
@@ -479,11 +516,37 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items }) =>
             ref={receivedByRef}
             value={formData.receivedBy}
             onChange={(e) => setFormData({ ...formData, receivedBy: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
+            onKeyDown={(e) => handleKeyDown(e, approverRef)}
             placeholder="Received by name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
           />
+        </div>
+        <div className="md:col-span-2 space-y-3">
+          <label className="block text-sm font-semibold text-gray-700 flex items-center">
+            <User className="h-4 w-4 mr-2 text-gray-500" />
+            Assigned Approver *
+          </label>
+          <Select 
+            value={formData.selectedApproverId.toString()} 
+            onValueChange={(value) => setFormData({ ...formData, selectedApproverId: parseInt(value) })}
+            disabled={submitting}
+          >
+            <SelectTrigger 
+              ref={approverRef}
+              className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
+              onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
+            >
+              <SelectValue placeholder="Select an approver" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl shadow-lg border-gray-200 max-h-60">
+              {approvers.map((approver) => (
+                <SelectItem key={approver.id} value={approver.id.toString()} className="px-4 py-2 hover:bg-blue-50">
+                  {approver.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <div className="space-y-3">

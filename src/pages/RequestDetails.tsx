@@ -347,7 +347,7 @@ const RequestDetails: React.FC = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.location || 'N/A'}</td>
                       </tr>
                       <tr className="bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Deployment Type</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Project Type</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || 'N/A'}</td>
                       </tr>
                       <tr>
@@ -437,7 +437,7 @@ const RequestDetails: React.FC = () => {
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.location || 'N/A'}</td>
                   </tr>
                   <tr className="bg-gray-50 border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Deployment Type</td>
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Project Type</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || 'N/A'}</td>
                   </tr>
                   <tr className="border-b border-gray-300">
@@ -724,7 +724,7 @@ interface DeploymentTypeFieldProps {
 
 const DeploymentTypeField: React.FC<DeploymentTypeFieldProps> = ({ value, editing, onChange }) => (
   <div>
-    <label className="block text-sm font-medium text-gray-600">Deployment Type</label>
+    <label className="block text-sm font-medium text-gray-600">Project Type</label>
     {editing ? (
       <Select value={value || ''} onValueChange={onChange}>
         <SelectTrigger className="mt-1 w-full rounded-md border-gray-300 focus:border-blue-500 focus:ring-blue-500">

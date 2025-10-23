@@ -370,12 +370,12 @@ const AIAssistant: React.FC = () => {
       doc.line(20, yPos, 190, yPos);
       yPos += 10;
 
-      // Table setup
+      // Table setup with adjusted column widths to sum to 170mm
       const tableX = 20;
       const tableWidth = 170;
-      const colWidths = { time: 25, item: 35, cat: 25, qty: 15, stock: 20, source: 20, req: 25, app: 20, iss: 25 };
+      const colWidths = { time: 20, item: 40, cat: 25, qty: 10, stock: 15, source: 15, req: 15, app: 15, iss: 15 };
       const headerHeight = 8;
-      const rowHeight = 6;
+      let rowHeight = 6; // Base row height, will adjust dynamically if text wraps
 
       // Table header
       doc.setFillColor(189, 195, 199); // Lighter grey header
@@ -390,18 +390,12 @@ const AIAssistant: React.FC = () => {
       });
       yPos += headerHeight;
 
-      // Table border
-      doc.setDrawColor(158, 158, 158);
-      doc.setLineWidth(0.5);
-      const tableHeight = headerHeight + (issuances.length * rowHeight) + 1;
-      doc.rect(tableX, yPos - headerHeight, tableWidth, tableHeight, 'S');
-
-      // Table rows
+      // Table rows with text wrapping
       doc.setTextColor(0, 0, 0);
       doc.setFontSize(8);
       doc.setFont(undefined, 'normal');
       issuances.forEach((issuance, index) => {
-        if (yPos > 270) {
+        if (yPos > 250) { // Leave room for footer
           doc.addPage();
           yPos = 20;
           // Add logo on new page if available
@@ -430,29 +424,71 @@ const AIAssistant: React.FC = () => {
         doc.setTextColor(sourceColor[0], sourceColor[1], sourceColor[2]);
         doc.setFont(undefined, 'bold');
 
+        // Function to wrap text and calculate height
+        const wrapText = (text: string, maxWidth: number): { lines: string[], height: number } => {
+          const words = text.split(' ');
+          const lines: string[] = [];
+          let currentLine = '';
+          words.forEach(word => {
+            const testLine = currentLine + (currentLine ? ' ' : '') + word;
+            const width = doc.getTextWidth(testLine);
+            if (width > maxWidth - 4) { // -4 for padding
+              if (currentLine) lines.push(currentLine);
+              currentLine = word;
+            } else {
+              currentLine = testLine;
+            }
+          });
+          if (currentLine) lines.push(currentLine);
+          return { lines, height: lines.length * 4 }; // Approx line height for fontSize 8
+        };
+
+        // Calculate max row height for this row
+        let maxRowHeight = rowHeight;
+        const fields = [
+          { text: time, width: colWidths.time },
+          { text: issuance.item_name, width: colWidths.item },
+          { text: issuance.category_name || 'Uncategorized', width: colWidths.cat },
+          { text: issuance.quantity.toString(), width: colWidths.qty },
+          { text: issuance.current_stock?.toString() || 'N/A', width: colWidths.stock },
+          { text: sourceBadge, width: colWidths.source },
+          { text: issuance.requester || 'N/A', width: colWidths.req },
+          { text: issuance.approver || 'N/A', width: colWidths.app },
+          { text: issuance.person_name, width: colWidths.iss }
+        ];
+
+        fields.forEach(field => {
+          const { height } = wrapText(field.text, field.width);
+          if (height > maxRowHeight) maxRowHeight = height;
+        });
+
+        // Draw row border (vertical lines would need to be drawn separately if needed)
+        doc.setDrawColor(158, 158, 158);
+        doc.setLineWidth(0.2);
         colX = tableX;
-        doc.text(time, colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.time;
-        doc.text(issuance.item_name.substring(0, 15) + (issuance.item_name.length > 15 ? '...' : ''), colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.item;
-        doc.text((issuance.category_name || 'Uncategorized').substring(0, 12) + '...', colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.cat;
-        doc.text(issuance.quantity.toString(), colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.qty;
-        doc.text(issuance.current_stock?.toString() || 'N/A', colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.stock;
-        doc.text(sourceBadge, colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.source;
-        doc.text((issuance.requester || 'N/A').substring(0, 10) + '...', colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.req;
-        doc.text((issuance.approver || 'N/A').substring(0, 8) + '...', colX + 2, yPos + 5, { align: 'left' });
-        colX += colWidths.app;
-        doc.text(issuance.person_name.substring(0, 10) + '...', colX + 2, yPos + 5, { align: 'left' });
+        fields.forEach(() => {
+          doc.line(colX, yPos, colX, yPos + maxRowHeight); // Vertical lines
+          colX += (colWidths as any)[Object.keys(colWidths)[fields.indexOf(fields[0])]] || 15; // Approximate
+        });
+        doc.line(tableX, yPos + maxRowHeight, tableX + tableWidth, yPos + maxRowHeight); // Horizontal line
+
+        // Draw text with wrapping
+        colX = tableX;
+        fields.forEach((field, fIndex) => {
+          const { lines } = wrapText(field.text, field.width);
+          lines.forEach((line, lIndex) => {
+            doc.text(line, colX + 2, yPos + 5 + (lIndex * 4), { align: 'left' });
+          });
+          colX += Object.values(colWidths)[fIndex];
+        });
 
         doc.setTextColor(0, 0, 0);
         doc.setFont(undefined, 'normal');
-        yPos += rowHeight;
+        yPos += maxRowHeight;
       });
+
+      // Outer table border
+      doc.rect(tableX, yPos - (headerHeight + (issuances.length * rowHeight)), tableWidth, headerHeight + (issuances.length * rowHeight) + 1, 'S');
 
       // Footer note with heart
       doc.setTextColor(149, 165, 166); // Grey-600
@@ -506,7 +542,7 @@ const AIAssistant: React.FC = () => {
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Daily Issuances');
-      const excelBlob = new Blob([new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const excelBlob = new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const filename = `daily-report-${format(reportDate, 'yyyy-MM-dd')}.xlsx`;
 
       return {
@@ -1079,7 +1115,11 @@ const AIAssistant: React.FC = () => {
         }
       }
       setSelectedReportDate(reportDate);
-      await handleGenerateDailyReport('pdf'); // Default to PDF
+      const formattedDate = format(reportDate, 'MMMM do, yyyy');
+      addMessage(`Ready to generate the daily report for ${formattedDate}. Would you like PDF or Excel format?`, false, [
+        { text: "PDF", action: () => handleGenerateDailyReport('pdf') },
+        { text: "Excel", action: () => handleGenerateDailyReport('excel') }
+      ]);
       return;
     }
 
@@ -1498,7 +1538,7 @@ const AIAssistant: React.FC = () => {
           {messages.length === 0 && (
             <div className="text-center py-8 text-gray-500">
               <Bot className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p className="text-lg">Ready when you are! Type a query like "show low stock" to kick things off.</p>
+              <p className="text-lg">Ready when you are! Type a query like like "show low stock" to kick things off.</p>
             </div>
           )}
           {messages.map(message => (
@@ -1570,7 +1610,6 @@ const AIAssistant: React.FC = () => {
                   <PopoverTrigger asChild>
                     <Button 
                       variant="outline" 
-                      onClick={() => setShowDatePicker(true)}
                       className="flex items-center gap-2 text-sm px-4 py-2 border-gray-300 hover:bg-gray-50"
                       disabled={loading}
                     >
@@ -1584,11 +1623,7 @@ const AIAssistant: React.FC = () => {
                       <Calendar
                         mode="single"
                         selected={selectedReportDate}
-                        onSelect={(date) => {
-                          setSelectedReportDate(date || new Date());
-                          setShowDatePicker(false);
-                          handleGenerateDailyReport('pdf');
-                        }}
+                        onSelect={(date) => setSelectedReportDate(date || new Date())}
                         className="rounded-md border"
                       />
                       <div className="flex gap-2 pt-2">
@@ -1596,12 +1631,21 @@ const AIAssistant: React.FC = () => {
                           variant="secondary" 
                           size="sm" 
                           onClick={() => {
-                            setSelectedReportDate(new Date());
                             setShowDatePicker(false);
                             handleGenerateDailyReport('pdf');
                           }}
                         >
-                          Today
+                          Generate PDF
+                        </Button>
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={() => {
+                            setShowDatePicker(false);
+                            handleGenerateDailyReport('excel');
+                          }}
+                        >
+                          Generate Excel
                         </Button>
                         <Button 
                           variant="secondary" 

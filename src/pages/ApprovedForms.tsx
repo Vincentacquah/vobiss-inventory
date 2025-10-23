@@ -383,7 +383,7 @@ const ApprovedForms: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Team Leader</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Deployment Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created At</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -622,7 +622,7 @@ const SkeletonTable: React.FC<SkeletonTableProps> = ({ canManageRequests, tabs }
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['Request ID', 'Project', 'Team Leader', 'Created By', 'Deployment Type', 'Items', 'Created At', 'Status', 'Actions'].map((header, index) => (
+                {['Request ID', 'Project', 'Team Leader', 'Created By', 'Project Type', 'Items', 'Created At', 'Status', 'Actions'].map((header, index) => (
                   <th key={index} className="px-6 py-3">
                     <div className="h-4 w-full bg-gray-200 rounded"></div>
                   </th>
@@ -770,7 +770,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
           />
         </div>
         <div className="md:col-span-2 space-y-3">
-          <label className="block text-sm font-semibold text-gray-700">Deployment Type</label>
+          <label className="block text-sm font-semibold text-gray-700">Project Type</label>
           <Input
             value={request.deployment_type}
             disabled
