@@ -1,6 +1,6 @@
 // Updated Index.tsx with updated ProtectedRoute for Approved Forms (exclude approver)
-import React, { useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import ProtectedRoute from '../components/ProtectedRoute'; // New import
 import Dashboard from './Dashboard';
@@ -21,6 +21,15 @@ import UsersPage from './UsersPage';
 
 const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Optional - Redirect root to dashboard only if truly on root (no sub-path)
+  useEffect(() => {
+    if (location.pathname === '/' && !location.search && !location.hash) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -32,8 +41,9 @@ const Index = () => {
         <div className="flex-1 flex flex-col overflow-hidden">
           <main className="flex-1 overflow-y-auto">
             <Routes>
-              {/* Public/Dashboard - accessible to all roles */}
-              <Route path="/" element={<Dashboard />} />
+              {/* Dashboard - accessible to all roles */}
+              <Route path="/" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><Dashboard /></ProtectedRoute>} />
+              <Route path="/dashboard" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><Dashboard /></ProtectedRoute>} />
               
               {/* Inventory & Categories - all roles */}
               <Route path="/inventory" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><Inventory /></ProtectedRoute>} />

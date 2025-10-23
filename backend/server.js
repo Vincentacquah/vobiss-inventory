@@ -7,6 +7,8 @@ import path from 'path';
 import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import {
   getItems, addItem, updateItem, deleteItem,
   getCategories, addCategory, updateCategory, deleteCategory,
@@ -22,6 +24,9 @@ import pool from './db.js';
 import { sendLowStockAlert } from './emailService.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -638,6 +643,23 @@ app.get('/api/requests/:id', authenticateToken, async (req, res) => {
     console.error('Error fetching request details:', error.stack);
     res.status(error.message === 'Request not found' ? 404 : 500).json({ error: error.message });
   }
+});
+
+// NEW: Serve static files from Vite's dist folder (for production) - adjusted path for /backend location
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// UPDATED: Catch-all handler for client-side routes (AFTER all API routes) - removed '*' path to avoid path-to-regexp error
+app.use((req, res) => {
+  // Skip API and uploads paths to avoid interference
+  if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+    return res.status(404).json({ error: 'Not Found' });
+  }
+  // Only handle GET requests for SPA (sendFile); others get 405
+  if (req.method !== 'GET') {
+    return res.status(405).send('Method Not Allowed');
+  }
+  // Serve index.html for SPA routing - adjusted path for /backend location
+  res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
 // Start the server

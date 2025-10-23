@@ -1,5 +1,6 @@
 // Updated AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom'; // NEW: For auto-redirect on logout
 
 interface User {
   username: string;
@@ -32,36 +33,75 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [token, setToken] = useState<string | null>(null); // Will load from localStorage below
+  const navigate = useNavigate(); // NEW: For redirect
 
+  // NEW: Load persisted state on mount (token + user as fallback)
   useEffect(() => {
-    if (token) {
+    const savedToken = localStorage.getItem('token');
+    const savedUser = localStorage.getItem('user'); // NEW: Load full user if available
+
+    if (savedToken) {
+      setToken(savedToken);
+      if (savedUser) {
+        // Prefer saved user (avoids decode errors)
+        try {
+          setUser(JSON.parse(savedUser));
+        } catch (error) {
+          console.error('Invalid saved user data');
+          localStorage.removeItem('user');
+        }
+      }
+    } else {
+      setToken(null);
+      setUser(null);
+    }
+  }, []);
+
+  // UPDATED: Derive user from token only if no saved user (fallback)
+  useEffect(() => {
+    if (token && !user) { // Only if user not already loaded
       try {
         // Decode JWT payload (client-side, not verified)
         const payload = JSON.parse(atob(token.split('.')[1]));
-        setUser({ 
+        const derivedUser: User = { 
           username: payload.username, 
           role: payload.role,
           first_name: payload.first_name,
           last_name: payload.last_name,
           full_name: payload.full_name
-        });
+        };
+        setUser(derivedUser);
+        // NEW: Save derived user for future loads
+        localStorage.setItem('user', JSON.stringify(derivedUser));
       } catch (error) {
         console.error('Invalid token');
         setToken(null);
         localStorage.removeItem('token');
+        localStorage.removeItem('user'); // NEW: Clear invalid user too
+        setUser(null);
       }
-    } else {
-      setUser(null);
     }
-  }, [token]);
+  }, [token, user]); // Depend on user to avoid loops
+
+  // UPDATED: Persist user on login/change
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('user');
+    }
+  }, [user]);
 
   const login = (newToken: string, userData: User) => {
     setToken(newToken);
     localStorage.setItem('token', newToken);
     setUser(userData);
+    // NEW: Optional - navigate to dashboard after login (adjust path)
+    // navigate('/dashboard', { replace: true });
   };
 
+  // UPDATED: Logout with API call + redirect
   const logout = async () => {
     const currentToken = localStorage.getItem('token');
     try {
@@ -80,7 +120,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
     setToken(null);
     localStorage.removeItem('token');
+    localStorage.removeItem('user'); // NEW: Clear user too
     setUser(null);
+    // NEW: Redirect to login
+    navigate('/login', { replace: true });
   };
 
   return (

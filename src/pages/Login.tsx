@@ -1,6 +1,6 @@
 // src/pages/Login.tsx
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom'; // Added useLocation
 import { useAuth } from '../context/AuthContext';
 import { loginUser } from '../api';
 
@@ -11,14 +11,25 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [showForgotInfo, setShowForgotInfo] = useState(false); // NEW: Toggle for forgot info display
   const navigate = useNavigate();
+  const location = useLocation(); // NEW: For preserving redirect path
   const { user, login } = useAuth();
 
+  // UPDATED: If already authenticated, redirect to preserved path or role-based
   useEffect(() => {
     if (user) {
-      navigate('/');
+      // Prioritize preserved path (e.g., from refresh on protected route)
+      const fromPath = location.state?.from?.pathname;
+      if (fromPath && fromPath !== '/login') {
+        navigate(fromPath, { replace: true });
+        return;
+      }
+      // Fallback to role-based
+      const redirectPath = getRoleBasedRedirect(user.role);
+      navigate(redirectPath, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, navigate, location.state]);
 
   // Helper for role-based redirects
   const getRoleBasedRedirect = (role) => {
@@ -48,9 +59,9 @@ const Login = () => {
       const data = await loginUser(username, password);
       login(data.token, data.user);
       
-      // Role-specific redirect
+      // Role-specific redirect (useEffect will handle preservation if needed)
       const redirectPath = getRoleBasedRedirect(data.user.role);
-      navigate(redirectPath);
+      navigate(redirectPath, { replace: true });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -58,15 +69,13 @@ const Login = () => {
     }
   };
 
-  // Handle forgot password - For now, redirect to contact superadmin or show message
-  // In future, could integrate with email service to notify superadmin
-  const handleForgotPassword = () => {
-    // Placeholder: Show alert or modal explaining to contact superadmin
-    alert('For password resets, please contact your Super Admin. They can reset your password and email you a new one.');
-    // Could navigate to a support page or open email client: window.location.href = 'mailto:admin@vobiss.com?subject=Password Reset Request';
+  // UPDATED: Handle forgot password - Toggle inline info display
+  const handleForgotPassword = (e: React.MouseEvent) => {
+    e.preventDefault(); // Prevent any form submission
+    setShowForgotInfo(!showForgotInfo); // Toggle visibility
   };
 
-  if (user) return null;
+  // REMOVED: Early return for user (let useEffect handle redirect to avoid flash)
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -230,13 +239,44 @@ const Login = () => {
                 </div>
                 <div className="text-sm">
                   <button 
+                    type="button" // Explicitly type="button" to prevent form submit
                     onClick={handleForgotPassword}
-                    className="font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                    className={`font-medium transition-colors ${
+                      showForgotInfo 
+                        ? 'text-blue-700 hover:text-blue-800' 
+                        : 'text-blue-600 hover:text-blue-700'
+                    }`}
                   >
-                    Forgot password?
+                    {showForgotInfo ? 'Hide info' : 'Forgot password?'}
                   </button>
                 </div>
               </div>
+
+              {/* NEW: Inline Forgot Password Info (toggleable, displayed on form) */}
+              {showForgotInfo && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+                  <div className="flex items-start">
+                    <svg className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-sm text-blue-800 ml-2">
+                      For password resets, please contact your Admin Support. They can reset your password and email you a new one.
+                    </p>
+                  </div>
+                  {/* Optional: Contact link */}
+                  <div className="pt-2">
+                    <a
+                      href="mailto:vobissvobiss@gmail.com?subject=Password Reset Request"
+                      className="inline-flex items-center px-3 py-1 text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-lg transition-colors"
+                    >
+                      <svg className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Admin Support
+                    </a>
+                  </div>
+                </div>
+              )}
 
               {/* Error message */}
               {error && (
@@ -269,20 +309,6 @@ const Login = () => {
                 </button>
               </div>
             </form>
-
-            {/* Demo credentials button - Updated for new default user */}
-            <div className="mt-6 text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('superadmin');
-                  setPassword('admin123');
-                }}
-                className="text-sm text-gray-500 hover:text-gray-700 transition-colors"
-              >
-                Use demo credentials (superadmin / admin123)
-              </button>
-            </div>
           </div>
         </div>
       </div>
