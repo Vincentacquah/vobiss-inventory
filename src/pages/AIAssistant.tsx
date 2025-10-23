@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Bot, MessageSquare, HelpCircle, X, Info, User, Clock, Mail, Download, FileText } from 'lucide-react';
+import { Send, Bot, MessageSquare, HelpCircle, X, Info, User, Clock, Mail, Download, FileText, Calendar as CalendarIcon, FileSpreadsheet } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { 
   getItems, 
@@ -7,6 +7,7 @@ import {
   getItemsOut, 
   addItem, 
   getRequests, 
+  getRequestDetails,
   getAuditLogs,
   getLowStockItems,
   sendLowStockAlert,
@@ -18,7 +19,12 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { format } from "date-fns";
 import jsPDF from 'jspdf';
+import * as XLSX from 'xlsx';
 
 // Load string-similarity via CDN
 const script = document.createElement('script');
@@ -61,6 +67,7 @@ interface ItemOut {
   quantity: number;
   date_time: string;
   item_name: string;
+  category_name: string;
 }
 
 /**
@@ -85,6 +92,21 @@ interface AuditLog {
   ip_address: string;
   details: any;
   timestamp: string;
+}
+
+/**
+ * Interface for combined issuance for daily reports
+ */
+interface CombinedIssuance {
+  person_name: string;
+  item_name: string;
+  category_name: string;
+  quantity: number;
+  date_time: string;
+  requester?: string;
+  approver?: string;
+  current_stock?: number;
+  source: 'direct' | 'request';
 }
 
 /**
@@ -124,6 +146,10 @@ const AIAssistant: React.FC = () => {
   }>({ mode: 'normal' });
   const [dataCache, setDataCache] = useState<any>({ lastUpdate: 0 });
 
+  // New state for daily report
+  const [selectedReportDate, setSelectedReportDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
   const { toast } = useToast();
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -143,6 +169,7 @@ const AIAssistant: React.FC = () => {
     { topic: "Send alert", command: "send low stock alert", description: "Notify supervisors about low stock via email" },
     { topic: "Generate report", command: "generate low stock report", description: "Create a PDF report of low stock items" },
     { topic: "Full system report", command: "generate full system report", description: "Comprehensive PDF with logins, inventory, issues, and health" },
+    { topic: "Daily report", command: "generate daily report", description: "Generate PDF/Excel for a specific day's issuances" },
   ];
 
   // Reduced real-time data refresh (every 30 seconds for speed)
@@ -233,6 +260,311 @@ const AIAssistant: React.FC = () => {
     } catch (error) {
       console.error('Error loading logo:', error);
       return ''; // Return empty if failed
+    }
+  };
+
+  // New function to generate daily report data
+  const generateDailyReportData = async (reportDate: Date): Promise<CombinedIssuance[]> => {
+    const dateStr = format(reportDate, 'yyyy-MM-dd');
+    const startDateTime = new Date(`${dateStr}T00:00:00`);
+    const endDateTime = new Date(`${dateStr}T23:59:59.999`);
+
+    const [itemsOutData, requestsData, itemsData] = await Promise.all([
+      getItemsOut(),
+      getRequests(),
+      getItems()
+    ]);
+
+    // Filter direct issuances
+    const directIssuances = itemsOutData
+      .map((io: ItemOut) => {
+        const issuanceDate = new Date(io.date_time);
+        if (issuanceDate >= startDateTime && issuanceDate <= endDateTime) {
+          const itemDetail = itemsData.find((i: Item) => i.id.toString() === io.item_id.toString());
+          return {
+            ...io,
+            source: 'direct' as const,
+            requester: undefined,
+            approver: undefined,
+            current_stock: itemDetail?.quantity || 0,
+          } as CombinedIssuance;
+        }
+        return null;
+      })
+      .filter(Boolean) as CombinedIssuance[];
+
+    // Filter completed requests and fetch details
+    const completedRequests = requestsData.filter((r: Request) => r.status === 'completed');
+    const requestIssuances: CombinedIssuance[] = [];
+    for (const request of completedRequests) {
+      const requestDate = new Date(request.created_at);
+      if (requestDate >= startDateTime && requestDate <= endDateTime && request.release_by) {
+        const details = await getRequestDetails(request.id);
+        if (details.items) {
+          const approver = details.approvals?.[0]?.approver_name || null;
+          details.items.forEach((item) => {
+            if (item.quantity_received && item.quantity_received > 0) {
+              const itemDetail = itemsData.find((i: Item) => i.id.toString() === item.item_id.toString());
+              requestIssuances.push({
+                person_name: request.release_by,
+                item_id: item.item_id.toString(),
+                quantity: item.quantity_received,
+                date_time: request.created_at,
+                item_name: item.item_name,
+                category_name: itemDetail?.category_name || 'Uncategorized',
+                source: 'request',
+                requester: request.created_by,
+                approver,
+                current_stock: itemDetail?.quantity || 0,
+              } as CombinedIssuance);
+            }
+          });
+        }
+      }
+    }
+
+    return [...directIssuances, ...requestIssuances].sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
+  };
+
+  const generateDailyPDF = async (reportDate: Date, issuances: CombinedIssuance[]): Promise<PDFResult> => {
+    try {
+      if (issuances.length === 0) {
+        return {
+          blob: null,
+          filename: '',
+          message: `No issuances recorded for ${format(reportDate, 'MMMM do, yyyy')} – a quiet day! No report needed, but let's check another date?`
+        };
+      }
+
+      const doc = new jsPDF();
+      const dateStr = format(reportDate, 'MMMM do, yyyy');
+      const logoBase64 = await loadLogo();
+      
+      let yPos = 20;
+      
+      // Add logo if available
+      if (logoBase64) {
+        doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+        yPos += 15;
+      }
+
+      // Title with grey background
+      doc.setFillColor(158, 158, 158); // Grey-500
+      doc.rect(20, yPos, 170, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(20);
+      doc.setFont(undefined, 'bold');
+      doc.text(`Daily Issuances Report - ${dateStr}`, 105, yPos + 8, { align: 'center' });
+      yPos += 20;
+      
+      // Subtitle
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(12);
+      doc.setFont(undefined, 'normal');
+      doc.text(`Generated on: ${new Date().toLocaleDateString()} | Total Issuances: ${issuances.length}`, 20, yPos);
+      yPos += 15;
+
+      // Decorative line
+      doc.setDrawColor(189, 195, 199); // Grey-400
+      doc.setLineWidth(1);
+      doc.line(20, yPos, 190, yPos);
+      yPos += 10;
+
+      // Table setup
+      const tableX = 20;
+      const tableWidth = 170;
+      const colWidths = { time: 25, item: 35, cat: 25, qty: 15, stock: 20, source: 20, req: 25, app: 20, iss: 25 };
+      const headerHeight = 8;
+      const rowHeight = 6;
+
+      // Table header
+      doc.setFillColor(189, 195, 199); // Lighter grey header
+      doc.rect(tableX, yPos, tableWidth, headerHeight, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'bold');
+      let colX = tableX;
+      ['Time', 'Item', 'Category', 'Qty Taken', 'Stock Left', 'Source', 'Requester', 'Approver', 'Issuer'].forEach(header => {
+        doc.text(header, colX + 2, yPos + 6, { align: 'left' });
+        colX += (colWidths as any)[header.toLowerCase().replace(/\s/g, '')] || 20;
+      });
+      yPos += headerHeight;
+
+      // Table border
+      doc.setDrawColor(158, 158, 158);
+      doc.setLineWidth(0.5);
+      const tableHeight = headerHeight + (issuances.length * rowHeight) + 1;
+      doc.rect(tableX, yPos - headerHeight, tableWidth, tableHeight, 'S');
+
+      // Table rows
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'normal');
+      issuances.forEach((issuance, index) => {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+          // Add logo on new page if available
+          if (logoBase64) {
+            doc.addImage(logoBase64, 'PNG', 20, yPos, 30, 10);
+            yPos += 15;
+          }
+          // Redraw header on new page
+          doc.setFillColor(189, 195, 199);
+          doc.rect(tableX, yPos, tableWidth, headerHeight, 'F');
+          doc.setTextColor(255, 255, 255);
+          doc.setFont(undefined, 'bold');
+          colX = tableX;
+          ['Time', 'Item', 'Category', 'Qty Taken', 'Stock Left', 'Source', 'Requester', 'Approver', 'Issuer'].forEach(header => {
+            doc.text(header, colX + 2, yPos + 6, { align: 'left' });
+            colX += (colWidths as any)[header.toLowerCase().replace(/\s/g, '')] || 20;
+          });
+          yPos += headerHeight;
+          doc.setTextColor(0, 0, 0);
+          doc.setFont(undefined, 'normal');
+        }
+
+        const time = format(new Date(issuance.date_time), 'HH:mm');
+        const sourceBadge = issuance.source === 'direct' ? 'Direct' : 'Request';
+        const sourceColor = issuance.source === 'direct' ? [59, 130, 246] : [16, 185, 129]; // Blue, Green
+        doc.setTextColor(sourceColor[0], sourceColor[1], sourceColor[2]);
+        doc.setFont(undefined, 'bold');
+
+        colX = tableX;
+        doc.text(time, colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.time;
+        doc.text(issuance.item_name.substring(0, 15) + (issuance.item_name.length > 15 ? '...' : ''), colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.item;
+        doc.text((issuance.category_name || 'Uncategorized').substring(0, 12) + '...', colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.cat;
+        doc.text(issuance.quantity.toString(), colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.qty;
+        doc.text(issuance.current_stock?.toString() || 'N/A', colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.stock;
+        doc.text(sourceBadge, colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.source;
+        doc.text((issuance.requester || 'N/A').substring(0, 10) + '...', colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.req;
+        doc.text((issuance.approver || 'N/A').substring(0, 8) + '...', colX + 2, yPos + 5, { align: 'left' });
+        colX += colWidths.app;
+        doc.text(issuance.person_name.substring(0, 10) + '...', colX + 2, yPos + 5, { align: 'left' });
+
+        doc.setTextColor(0, 0, 0);
+        doc.setFont(undefined, 'normal');
+        yPos += rowHeight;
+      });
+
+      // Footer note with heart
+      doc.setTextColor(149, 165, 166); // Grey-600
+      doc.setFontSize(8);
+      doc.text('Generated with love by Vobiss Inventory AI Assistant ❤️', 20, yPos + 10);
+
+      const pdfBlob = doc.output('blob');
+      const filename = `daily-report-${format(reportDate, 'yyyy-MM-dd')}.pdf`;
+
+      return {
+        blob: pdfBlob,
+        filename,
+        message: `Daily report for ${dateStr} ready! 📅 It details ${issuances.length} issuances with full breakdowns (taken, stock left, who/when). Click below to download. Fancy Excel version or another day?`
+      };
+    } catch (error) {
+      console.error("Error generating daily PDF:", error);
+      toast({ title: "Error", description: "Failed to generate daily report.", variant: "destructive" });
+      return {
+        blob: null,
+        filename: '',
+        message: "Daily report hit a snag – data's solid, but PDF glitch. Retry or chat for details?"
+      };
+    }
+  };
+
+  const generateDailyExcel = async (reportDate: Date, issuances: CombinedIssuance[]): Promise<PDFResult> => {
+    try {
+      if (issuances.length === 0) {
+        return {
+          blob: null,
+          filename: '',
+          message: `No issuances for ${format(reportDate, 'MMMM do, yyyy')} – quiet day vibes! Let's pick another.`
+        };
+      }
+
+      const wsData = [
+        ['Time', 'Item', 'Category', 'Qty Taken', 'Stock Left', 'Source', 'Requester', 'Approver', 'Issuer'],
+        ...issuances.map(iss => [
+          format(new Date(iss.date_time), 'HH:mm'),
+          iss.item_name,
+          iss.category_name || 'Uncategorized',
+          iss.quantity,
+          iss.current_stock || 'N/A',
+          iss.source,
+          iss.requester || 'N/A',
+          iss.approver || 'N/A',
+          iss.person_name
+        ])
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Daily Issuances');
+      const excelBlob = new Blob([new Uint8Array(XLSX.write(wb, { type: 'array', bookType: 'xlsx' }))], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const filename = `daily-report-${format(reportDate, 'yyyy-MM-dd')}.xlsx`;
+
+      return {
+        blob: excelBlob,
+        filename,
+        message: `Daily Excel for ${format(reportDate, 'MMMM do, yyyy')} exported! 📊 ${issuances.length} rows of issuances data, ready for crunching. Download below. PDF alt or date swap?`
+      };
+    } catch (error) {
+      console.error("Error generating daily Excel:", error);
+      toast({ title: "Error", description: "Failed to generate Excel.", variant: "destructive" });
+      return {
+        blob: null,
+        filename: '',
+        message: "Excel export fumbled – try PDF or chat it out?"
+      };
+    }
+  };
+
+  const handleGenerateDailyReport = async (formatType: 'pdf' | 'excel' = 'pdf') => {
+    setLoading(true);
+    try {
+      const reportDate = selectedReportDate;
+      const issuances = await generateDailyReportData(reportDate);
+      const result = formatType === 'pdf' 
+        ? await generateDailyPDF(reportDate, issuances)
+        : await generateDailyExcel(reportDate, issuances);
+      addMessage(result.message, false, undefined, result.blob, result.filename);
+    } catch (error) {
+      console.error("Error in daily report:", error);
+      addMessage("Daily report ran into turbulence – fresh data pull needed? Let's troubleshoot.", false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSendAlert = async () => {
+    try {
+      setLoading(true);
+      const lowStockItems = await getLowStockItems();
+      if (lowStockItems.length === 0) {
+        addMessage("No low stock items to alert on – the team's off the hook today! What next?", false);
+        setLoading(false);
+        return;
+      }
+
+      const supervisors = await getSupervisors();
+      const response = await sendLowStockAlert({ lowStockItems, supervisors });
+
+      addMessage(`Alert fired off! 📧 I let the supervisors know about those ${lowStockItems.length} items. They'll jump on restocking. Response: "${response.message}". High five? What's up next?`, false, [{
+        text: "Generate Daily Report",
+        action: () => handleGenerateDailyReport()
+      }]);
+    } catch (error) {
+      console.error("Error sending alert:", error);
+      toast({ title: "Oops", description: "Alert send failed. Check settings?", variant: "destructive" });
+      addMessage("Hit a bump sending the alert – maybe check the email setup? Want me to try again?", false);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -513,7 +845,6 @@ const AIAssistant: React.FC = () => {
       doc.setFillColor(189, 195, 199);
       doc.setTextColor(255, 255, 255);
       doc.setFont(undefined, 'bold');
-      doc.setFontSize(12);
       doc.text('3. Current Inventory Summary', 20, yPos);
       yPos += 10;
       doc.setFontSize(10);
@@ -701,35 +1032,6 @@ const AIAssistant: React.FC = () => {
     }
   };
 
-  const handleSendAlert = async () => {
-    try {
-      setLoading(true);
-      const lowStockItems = await getLowStockItems();
-      if (lowStockItems.length === 0) {
-        addMessage("No low stock items to alert on – the team's off the hook today! What next?", false);
-        setLoading(false);
-        return;
-      }
-
-      const supervisors = await getSupervisors();
-      const response = await sendLowStockAlert({ lowStockItems, supervisors });
-
-      addMessage(`Alert fired off! 📧 I let the supervisors know about those ${lowStockItems.length} items. They'll jump on restocking. Response: "${response.message}". High five? What's up next?`, false, [{
-        text: "Full System Report",
-        action: async () => {
-          const result = await generateFullSystemPDF();
-          addMessage(result.message, false, undefined, result.blob, result.filename);
-        }
-      }]);
-    } catch (error) {
-      console.error("Error sending alert:", error);
-      toast({ title: "Oops", description: "Alert send failed. Check settings?", variant: "destructive" });
-      addMessage("Hit a bump sending the alert – maybe check the email setup? Want me to try again?", false);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSend = async () => {
     if (!input.trim()) return;
     const userMessage = input.trim();
@@ -762,6 +1064,22 @@ const AIAssistant: React.FC = () => {
     // Handle conversational flow for adding items
     if (conversationState.mode === 'addingItem' && conversationState.waitingFor) {
       await handleAddItemResponse(query);
+      return;
+    }
+
+    // New intent for daily report
+    const dailyReportMatch = lowerQuery.match(/generate.*daily.*report(?:\s+for\s+(.+))?/i);
+    if (dailyReportMatch) {
+      const dateStr = dailyReportMatch[1];
+      let reportDate = new Date();
+      if (dateStr) {
+        const parsedDate = new Date(dateStr);
+        if (!isNaN(parsedDate.getTime())) {
+          reportDate = parsedDate;
+        }
+      }
+      setSelectedReportDate(reportDate);
+      await handleGenerateDailyReport('pdf'); // Default to PDF
       return;
     }
 
@@ -1211,7 +1529,7 @@ const AIAssistant: React.FC = () => {
                           className="w-full text-gray-700 border-gray-200 hover:bg-gray-50"
                         >
                           <Download className="h-4 w-4 mr-2" />
-                          Download PDF
+                          Download {message.downloadFilename?.endsWith('.pdf') ? 'PDF' : 'Excel'}
                         </Button>
                       </div>
                     )}
@@ -1235,6 +1553,70 @@ const AIAssistant: React.FC = () => {
             </div>
           )}
           <div ref={messagesEndRef} />
+          {/* New Quick Actions Section */}
+          <Card className="bg-white border-gray-200 shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Button 
+                  variant="outline" 
+                  onClick={handleSendAlert}
+                  className="flex items-center gap-2 text-sm px-4 py-2 border-gray-300 hover:bg-gray-50"
+                  disabled={loading}
+                >
+                  <Mail className="h-4 w-4" />
+                  Send Low Stock Alert
+                </Button>
+                <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setShowDatePicker(true)}
+                      className="flex items-center gap-2 text-sm px-4 py-2 border-gray-300 hover:bg-gray-50"
+                      disabled={loading}
+                    >
+                      <CalendarIcon className="h-4 w-4" />
+                      Generate Daily Report
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <div className="p-4 space-y-2">
+                      <Label>Select Date</Label>
+                      <Calendar
+                        mode="single"
+                        selected={selectedReportDate}
+                        onSelect={(date) => {
+                          setSelectedReportDate(date || new Date());
+                          setShowDatePicker(false);
+                          handleGenerateDailyReport('pdf');
+                        }}
+                        className="rounded-md border"
+                      />
+                      <div className="flex gap-2 pt-2">
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={() => {
+                            setSelectedReportDate(new Date());
+                            setShowDatePicker(false);
+                            handleGenerateDailyReport('pdf');
+                          }}
+                        >
+                          Today
+                        </Button>
+                        <Button 
+                          variant="secondary" 
+                          size="sm" 
+                          onClick={() => setShowDatePicker(false)}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </main>
       <footer className="p-4 bg-white border-t border-gray-200">
@@ -1242,7 +1624,7 @@ const AIAssistant: React.FC = () => {
           <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center space-x-2">
             <Input
               ref={inputRef}
-              placeholder="What's on your mind? (e.g., 'show low stock' or 'generate full system report')"
+              placeholder="What's on your mind? (e.g., 'show low stock' or 'generate daily report for yesterday')"
               className="flex-1 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 transition-colors"
               value={input}
               onChange={e => setInput(e.target.value)}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 
 interface UsageData {
   date: string;
+  formattedDate: string;
   items: number;
   users: number;
   source_direct: number;
@@ -46,6 +47,9 @@ interface ItemOut {
 
 interface CombinedIssuance extends ItemOut {
   source: 'direct' | 'request';
+  requester?: string;
+  approver?: string;
+  current_stock?: number;
 }
 
 interface Category {
@@ -57,18 +61,24 @@ interface Item {
   id: string;
   name: string;
   category_name: string;
+  quantity: number;
 }
 
 interface Request {
   id: number;
+  created_by: string;
   release_by: string | null;
   updated_at: string;
+  status?: string;
   details?: {
     items: {
       id: number;
       item_id: number;
       quantity_received: number | null;
       item_name: string;
+    }[];
+    approvals?: {
+      approver_name: string;
     }[];
   };
 }
@@ -77,17 +87,23 @@ const Reports: React.FC = () => {
   const [usageData, setUsageData] = useState<UsageData[]>([]);
   const [topItems, setTopItems] = useState<TopItem[]>([]);
   const [topUsers, setTopUsers] = useState<TopUser[]>([]);
-  const [timeRange, setTimeRange] = useState<string>('7');
+  const [filteredIssuances, setFilteredIssuances] = useState<CombinedIssuance[]>([]);
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return d.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie' | 'scatter'>('bar');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const { toast } = useToast();
 
   useEffect(() => {
-    loadReportData();
-  }, [timeRange]);
+    loadReportData(startDate, endDate);
+  }, [startDate, endDate]);
 
-  const loadReportData = async () => {
+  const loadReportData = async (start: string, end: string) => {
     try {
       setIsLoading(true);
       const [itemsOutData, categoriesData, requestsData, itemsData] = await Promise.all([
@@ -114,9 +130,11 @@ const Reports: React.FC = () => {
       requestDetailsArray.forEach((details, index) => {
         const request = completedRequests[index];
         if (request.release_by && details.items) {
+          const approver = details.approvals?.[0]?.approver_name || null;
+          const requester = request.created_by;
           details.items.forEach((item) => {
             if (item.quantity_received && item.quantity_received > 0) {
-              const itemDetail = itemsData.find((i: Item) => i.id === item.item_id.toString());
+              const itemDetail = itemsData.find((i: Item) => i.id.toString() === item.item_id.toString());
               requestIssuances.push({
                 id: `req-${request.id}-${item.id}`,
                 person_name: request.release_by,
@@ -126,6 +144,9 @@ const Reports: React.FC = () => {
                 item_name: item.item_name,
                 category_name: itemDetail?.category_name || 'Uncategorized',
                 source: 'request',
+                requester,
+                approver,
+                current_stock: itemDetail?.quantity || 0,
               });
             }
           });
@@ -134,17 +155,32 @@ const Reports: React.FC = () => {
 
       // Combine direct issuances and request issuances
       const allIssuances: CombinedIssuance[] = [
-        ...itemsOutData.map((io: ItemOut) => ({ ...io, source: 'direct' as const })),
+        ...itemsOutData.map((io: ItemOut) => ({ 
+          ...io, 
+          source: 'direct' as const,
+          requester: undefined,
+          approver: undefined,
+          current_stock: itemsData.find((i: Item) => i.id.toString() === io.item_id.toString())?.quantity || 0,
+        })),
         ...requestIssuances,
       ];
 
-      const usageByDate = generateUsageByDate(allIssuances, parseInt(timeRange));
+      // Filter issuances by date range
+      const startDateTime = new Date(start + 'T00:00:00');
+      const endDateTime = new Date(end + 'T23:59:59.999');
+      const filteredIssuancesLocal = allIssuances.filter((issuance) => {
+        const issuanceDate = new Date(issuance.date_time);
+        return issuanceDate >= startDateTime && issuanceDate <= endDateTime;
+      });
+      setFilteredIssuances(filteredIssuancesLocal);
+
+      const usageByDate = generateUsageByDate(filteredIssuancesLocal, start, end);
       setUsageData(usageByDate);
 
-      const itemUsage = generateTopItems(allIssuances, categoriesData);
+      const itemUsage = generateTopItems(filteredIssuancesLocal, categoriesData);
       setTopItems(itemUsage);
 
-      const userUsage = generateTopUsers(allIssuances);
+      const userUsage = generateTopUsers(filteredIssuancesLocal);
       setTopUsers(userUsage);
     } catch (error) {
       console.error('Error loading report data:', error);
@@ -156,20 +192,22 @@ const Reports: React.FC = () => {
       setUsageData([]);
       setTopItems([]);
       setTopUsers([]);
+      setFilteredIssuances([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const generateUsageByDate = (issuances: CombinedIssuance[], days: number): UsageData[] => {
+  const generateUsageByDate = (issuances: CombinedIssuance[], startStr: string, endStr: string): UsageData[] => {
     const dateMap: { [key: string]: UsageTracking } = {};
-    const today = new Date();
+    const start = new Date(startStr + 'T00:00:00');
+    const end = new Date(endStr + 'T23:59:59.999');
+    let current = new Date(start);
 
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
+    while (current <= end) {
+      const dateStr = current.toISOString().split('T')[0];
       dateMap[dateStr] = { date: dateStr, items: 0, users: new Set<string>(), source_direct: 0, source_request: 0 };
+      current.setDate(current.getDate() + 1);
     }
 
     issuances.forEach((issuance) => {
@@ -185,13 +223,16 @@ const Reports: React.FC = () => {
       }
     });
 
-    return Object.values(dateMap).map((entry) => ({
-      date: entry.date,
-      items: entry.items,
-      users: entry.users.size,
-      source_direct: entry.source_direct,
-      source_request: entry.source_request,
-    }));
+    return Object.values(dateMap)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((entry) => ({
+        date: entry.date,
+        formattedDate: formatDateForDisplay(entry.date),
+        items: entry.items,
+        users: entry.users.size,
+        source_direct: entry.source_direct,
+        source_request: entry.source_request,
+      }));
   };
 
   const generateTopItems = (issuances: CombinedIssuance[], categories: Category[]): TopItem[] => {
@@ -205,8 +246,7 @@ const Reports: React.FC = () => {
       if (!itemCounts[itemId]) {
         itemCounts[itemId] = { count: 0, name: itemName, category: categoryName, source: record.source };
       } else if (itemCounts[itemId].source !== record.source) {
-        // If mixed sources, prioritize the one with higher count or keep as is
-        itemCounts[itemId].source = record.source; // Simple: last source wins, or aggregate
+        itemCounts[itemId].source = record.source;
       }
       itemCounts[itemId].count += record.quantity || 0;
     });
@@ -241,27 +281,67 @@ const Reports: React.FC = () => {
       .slice(0, 5);
   };
 
+  const formatDateForDisplay = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[date.getDay()];
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${dayName}, ${day}/${month}/${year}`;
+  };
+
+  const formatDate = (dateTime: string) => {
+    const date = new Date(dateTime);
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = dayNames[date.getDay()];
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return {
+      fullDate: `${dayName}, ${day}/${month}/${year}`,
+      time: `${hours}:${minutes}`
+    };
+  };
+
   const handleExport = () => {
-    const csvData = usageData.map((row) => `${row.date},${row.items},${row.users},${row.source_direct},${row.source_request}`).join('\n');
-    const blob = new Blob([`Date,Total Items,Users,Direct Issuances,Request Issuances\n${csvData}`], { type: 'text/csv' });
+    if (filteredIssuances.length === 0) {
+      toast({
+        title: 'No Data',
+        description: 'No issuances to export',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const csvContent = [
+      'Date,Item,Category,Quantity Taken,Current Stock,Source,Requester,Approver,Issuer',
+      ...filteredIssuances.map((iss) => {
+        const { fullDate } = formatDate(iss.date_time);
+        return `"${fullDate}","${iss.item_name}","${iss.category_name}","${iss.quantity}","${iss.current_stock}","${iss.source}","${iss.requester || 'N/A'}","${iss.approver || 'N/A'}","${iss.person_name}"`;
+      })
+    ].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `inventory-report-${timeRange}-days.csv`;
+    a.download = `inventory-report-${startDate}-to-${endDate}.csv`;
     a.click();
     window.URL.revokeObjectURL(url);
     toast({
       title: 'Success',
-      description: 'Report data has been exported to CSV',
+      description: 'Detailed report data has been exported to CSV',
       variant: 'default',
     });
   };
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
+      const formattedLabel = formatDateForDisplay(label);
       return (
         <div className="bg-white p-3 border border-gray-200 shadow-md rounded-md">
-          <p className="font-medium text-gray-900">{label}</p>
+          <p className="font-medium text-gray-900">{formattedLabel}</p>
           {payload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color }}>
               {entry.name}: {entry.value}
@@ -275,10 +355,15 @@ const Reports: React.FC = () => {
 
   const totalItemsIssued = usageData.reduce((sum, day) => sum + day.items, 0);
   const maxActiveUsers = Math.max(...usageData.map((day) => day.users), 0);
-  const avgDailyUsage = Math.round(totalItemsIssued / (usageData.length || 1));
+  const numDays = usageData.length;
+  const avgDailyUsage = numDays > 0 ? Math.round(totalItemsIssued / numDays) : 0;
   const totalDirect = usageData.reduce((sum, day) => sum + day.source_direct, 0);
   const totalRequest = usageData.reduce((sum, day) => sum + day.source_request, 0);
   const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444'];
+
+  const formattedStartDate = formatDateForDisplay(startDate);
+  const formattedEndDate = formatDateForDisplay(endDate);
+  const isSingleDay = startDate === endDate;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -297,9 +382,9 @@ const Reports: React.FC = () => {
             Settings
             {showSettings ? <ChevronUp className="h-4 w-4 ml-2" /> : <ChevronDown className="h-4 w-4 ml-2" />}
           </Button>
-          <Button onClick={handleExport} className="bg-green-600 hover:bg-green-700 text-white">
+          <Button onClick={handleExport} className="bg-green-600 hover:bg-green-700 text-white" disabled={filteredIssuances.length === 0}>
             <Download className="h-4 w-4 mr-2" />
-            Export CSV
+            Export Detailed CSV
           </Button>
         </div>
       </div>
@@ -308,17 +393,22 @@ const Reports: React.FC = () => {
         <div className="mb-6 bg-white p-4 rounded-xl border border-gray-200 shadow-sm animate-in slide-in-from-top-2 duration-300">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Time Range</label>
-              <select
-                value={timeRange}
-                onChange={(e) => setTimeRange(e.target.value)}
+              <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="7">Last 7 days</option>
-                <option value="14">Last 14 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 90 days</option>
-              </select>
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Chart Type</label>
@@ -359,15 +449,9 @@ const Reports: React.FC = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Actions</label>
-              <Button variant="outline" size="sm" className="bg-white w-full" onClick={loadReportData}>
+              <Button variant="outline" size="sm" className="bg-white w-full" onClick={() => loadReportData(startDate, endDate)}>
                 <RefreshCw className="h-4 w-4 mr-2" /> Refresh Data
               </Button>
-            </div>
-            <div className="md:col-span-1">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Data Sources</label>
-              <div className="text-xs text-gray-500">
-                Direct + Requests
-              </div>
             </div>
           </div>
         </div>
@@ -388,7 +472,7 @@ const Reports: React.FC = () => {
                 <div>
                   <p className="text-sm font-medium text-gray-600">Total Items Issued</p>
                   <p className="text-3xl font-bold text-gray-900 mt-2">{totalItemsIssued}</p>
-                  <p className="text-sm text-blue-600 mt-1">Last {timeRange} days</p>
+                  <p className="text-sm text-blue-600 mt-1">{formattedStartDate} to {formattedEndDate}</p>
                   <p className="text-xs text-gray-500 mt-1">Direct: {totalDirect} | Requests: {totalRequest}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-blue-100">
@@ -434,7 +518,7 @@ const Reports: React.FC = () => {
                 {chartType === 'bar' ? (
                   <BarChart data={usageData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <XAxis dataKey="formattedDate" tick={{ fontSize: 12 }} angle={-45} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend />
@@ -445,7 +529,7 @@ const Reports: React.FC = () => {
                 ) : chartType === 'line' ? (
                   <LineChart data={usageData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <XAxis dataKey="formattedDate" tick={{ fontSize: 12 }} angle={-45} textAnchor="end" height={60} />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip content={<CustomTooltip />} />
                     <Legend />
@@ -476,7 +560,7 @@ const Reports: React.FC = () => {
                 ) : chartType === 'scatter' ? (
                   <ScatterChart>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                    <XAxis type="category" dataKey="date" name="Date" tick={{ fontSize: 12 }} />
+                    <XAxis type="category" dataKey="formattedDate" name="Date" tick={{ fontSize: 12 }} angle={-45} textAnchor="end" height={60} />
                     <YAxis type="number" name="Items" tick={{ fontSize: 12 }} />
                     <ZAxis type="number" range={[100]} name="Users" />
                     <Tooltip cursor={{ strokeDasharray: '3 3' }} />
@@ -547,6 +631,62 @@ const Reports: React.FC = () => {
               )}
             </div>
           </div>
+
+          {isSingleDay && filteredIssuances.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mt-6">
+              <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                <FileText className="h-5 w-5 mr-2 text-indigo-600" />
+                Daily Issuances Details - {formattedStartDate}
+              </h2>
+              <p className="text-sm text-gray-600 mb-4">Items taken out and current stock levels</p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty Taken</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Stock</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Requester</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approver</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issuer</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredIssuances.map((iss, index) => {
+                      const { fullDate, time } = formatDate(iss.date_time);
+                      return (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <div className="font-medium">{fullDate}</div>
+                            <div className="text-gray-500 text-xs">{time}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{iss.item_name}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{iss.category_name || 'Uncategorized'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{iss.quantity}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{iss.current_stock || 0}</td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              iss.source === 'direct' 
+                                ? 'bg-blue-100 text-blue-800' 
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {iss.source.charAt(0).toUpperCase() + iss.source.slice(1)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-900">{iss.requester || 'N/A'}</td>
+                          <td className="px-6 py-4 text-sm text-gray-900">{iss.approver || 'N/A'}</td>
+                          <td className="px-6 py-4 text-sm font-medium text-gray-900">{iss.person_name}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
