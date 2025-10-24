@@ -4,6 +4,7 @@ import { getRequestDetails, updateRequest, getItems } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 
@@ -35,15 +36,17 @@ interface Rejection {
 
 interface RequestDetails {
   id: number;
+  type?: 'material_request' | 'item_return';
   created_by: string;
-  team_leader_name: string;
-  team_leader_phone: string;
+  team_leader_name?: string;
+  team_leader_phone?: string;
   project_name: string;
-  isp_name: string;
+  isp_name?: string;
   location: string;
-  deployment_type: 'Deployment' | 'Maintenance';
+  deployment_type?: 'Deployment' | 'Maintenance';
   release_by: string | null;
   received_by: string | null;
+  reason?: string;
   status: 'pending' | 'approved' | 'completed' | 'rejected';
   created_at: string;
   updated_at: string;
@@ -54,7 +57,7 @@ interface RequestDetails {
 
 interface EditableItem {
   name: string;
-  requested: number;
+  requested?: number;
   received?: number;
   returned?: number;
 }
@@ -87,12 +90,18 @@ const RequestDetails: React.FC = () => {
       setEditData(requestData);
       setAllItems(itemsData);
       setSelectedItems(
-        requestData.items.map(item => ({
-          name: item.item_name,
-          requested: item.quantity_requested || 0,
-          received: item.quantity_received || 0,
-          returned: item.quantity_returned || 0
-        }))
+        requestData.items.map(item => {
+          const base = {
+            name: item.item_name,
+            requested: item.quantity_requested || 0,
+            received: item.quantity_received || 0,
+            returned: item.quantity_returned || 0
+          };
+          if (requestData.type === 'item_return') {
+            base.returned = item.quantity_requested || 0;
+          }
+          return base;
+        })
       );
     } catch (error) {
       console.error('Error loading data:', error);
@@ -117,7 +126,10 @@ const RequestDetails: React.FC = () => {
   };
 
   const addItemRow = () => {
-    setSelectedItems([...selectedItems, { name: '', requested: 0, received: 0, returned: 0 }]);
+    const newItem: EditableItem = request?.type === 'item_return' 
+      ? { name: '', returned: 0 } 
+      : { name: '', requested: 0, received: 0, returned: 0 };
+    setSelectedItems([...selectedItems, newItem]);
   };
 
   const removeItemRow = (index: number) => {
@@ -126,15 +138,22 @@ const RequestDetails: React.FC = () => {
 
   const handleSaveEdit = async () => {
     try {
+      const isReturn = request?.type === 'item_return';
+      const itemsToSave = selectedItems.map(item => ({
+        ...item,
+        requested: isReturn ? (item.returned || 0) : (item.requested || 0)
+      }));
       await updateRequest(id!, {
         createdBy: editData.created_by,
-        teamLeaderName: editData.team_leader_name,
-        teamLeaderPhone: editData.team_leader_phone,
-        projectName: editData.project_name,
-        ispName: editData.isp_name,
-        location: editData.location,
-        deployment: editData.deployment_type,
-        items: selectedItems
+        ...(isReturn ? { reason: editData.reason } : {
+          teamLeaderName: editData.team_leader_name,
+          teamLeaderPhone: editData.team_leader_phone,
+          projectName: editData.project_name,
+          ispName: editData.isp_name,
+          location: editData.location,
+          deployment: editData.deployment_type,
+        }),
+        items: itemsToSave
       });
       setEditing(false);
       await loadData();
@@ -156,12 +175,18 @@ const RequestDetails: React.FC = () => {
     setEditing(false);
     setEditData(request!);
     setSelectedItems(
-      request!.items.map(item => ({
-        name: item.item_name,
-        requested: item.quantity_requested || 0,
-        received: item.quantity_received || 0,
-        returned: item.quantity_returned || 0
-      }))
+      request!.items.map(item => {
+        const base = {
+          name: item.item_name,
+          requested: item.quantity_requested || 0,
+          received: item.quantity_received || 0,
+          returned: item.quantity_returned || 0
+        };
+        if (request!.type === 'item_return') {
+          base.returned = item.quantity_requested || 0;
+        }
+        return base;
+      })
     );
   };
 
@@ -211,9 +236,12 @@ const RequestDetails: React.FC = () => {
     return <NotFoundState />;
   }
 
+  const isReturn = request.type === 'item_return';
   const isEditable = request.status === 'pending';
   const statusConfig = getStatusConfig(request.status);
   const statusText = request.status.charAt(0).toUpperCase() + request.status.slice(1);
+  const formTitle = isReturn ? 'ITEM RETURN FORM' : 'REQUEST FORM FOR MATERIALS';
+  const requesterLabel = isReturn ? 'Returned by' : 'Requested by';
 
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
@@ -257,7 +285,7 @@ const RequestDetails: React.FC = () => {
               alt="VOBISS Logo" 
               className="h-16 mx-auto mb-4"
             />
-            <h1 className="text-3xl font-bold text-gray-900">REQUEST FORM FOR MATERIALS</h1>
+            <h1 className="text-3xl font-bold text-gray-900">{formTitle}</h1>
           </div>
 
           <div className="flex justify-end mb-8">
@@ -266,61 +294,103 @@ const RequestDetails: React.FC = () => {
 
           {/* Project Information Section - Screen */}
           <section className="mb-8">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b border-gray-200 pb-2">Project Information</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b border-gray-200 pb-2">
+              {isReturn ? 'Return Information' : 'Project Information'}
+            </h2>
             <div className="bg-gray-50 rounded-lg p-6">
               <div className="mb-6 italic text-gray-600 text-center border-b border-gray-200 pb-3">
-                <p className="text-lg">Requested by: <span className="font-semibold">{request.created_by}</span></p>
+                <p className="text-lg">{requesterLabel}: <span className="font-semibold">{request.created_by}</span></p>
               </div>
               {editing ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <DetailField
-                    label="Project Name"
-                    value={editData.project_name}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('project_name', val)}
-                  />
-                  <DetailField
-                    label="Team Leader Name"
-                    value={editData.team_leader_name}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('team_leader_name', val)}
-                  />
-                  <DetailField
-                    label="Team Leader Phone"
-                    value={editData.team_leader_phone}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('team_leader_phone', val)}
-                  />
-                  <DetailField
-                    label="ISP Name"
-                    value={editData.isp_name || 'N/A'}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('isp_name', val)}
-                  />
-                  <DetailField
-                    label="Location"
-                    value={editData.location}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('location', val)}
-                  />
-                  <DeploymentTypeField
-                    value={editData.deployment_type}
-                    editing={true}
-                    onChange={(val) => handleFieldChange('deployment_type', val)}
-                  />
-                  <DetailField
-                    label="Received By"
-                    value={request.received_by || 'N/A'}
-                    editing={false}
-                  />
-                  <DateField
-                    label="Created At"
-                    value={request.created_at}
-                  />
-                  <DateField
-                    label="Updated At"
-                    value={request.updated_at}
-                  />
+                  {isReturn ? (
+                    <>
+                      <DetailField
+                        label="Project Name"
+                        value={editData.project_name}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('project_name', val)}
+                      />
+                      <DetailField
+                        label="Location"
+                        value={editData.location}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('location', val)}
+                      />
+                      <div className="lg:col-span-3">
+                        <ReasonField
+                          label="Return Reason"
+                          value={editData.reason || ''}
+                          editing={true}
+                          onChange={(val) => handleFieldChange('reason', val)}
+                        />
+                      </div>
+                      <DetailField
+                        label="Received By"
+                        value={request.received_by || 'N/A'}
+                        editing={false}
+                      />
+                      <DateField
+                        label="Created At"
+                        value={request.created_at}
+                      />
+                      <DateField
+                        label="Updated At"
+                        value={request.updated_at}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <DetailField
+                        label="Project Name"
+                        value={editData.project_name}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('project_name', val)}
+                      />
+                      <DetailField
+                        label="Team Leader Name"
+                        value={editData.team_leader_name}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('team_leader_name', val)}
+                      />
+                      <DetailField
+                        label="Team Leader Phone"
+                        value={editData.team_leader_phone}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('team_leader_phone', val)}
+                      />
+                      <DetailField
+                        label="ISP Name"
+                        value={editData.isp_name || 'N/A'}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('isp_name', val)}
+                      />
+                      <DetailField
+                        label="Location"
+                        value={editData.location}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('location', val)}
+                      />
+                      <DeploymentTypeField
+                        value={editData.deployment_type}
+                        editing={true}
+                        onChange={(val) => handleFieldChange('deployment_type', val)}
+                      />
+                      <DetailField
+                        label="Received By"
+                        value={request.received_by || 'N/A'}
+                        editing={false}
+                      />
+                      <DateField
+                        label="Created At"
+                        value={request.created_at}
+                      />
+                      <DateField
+                        label="Updated At"
+                        value={request.updated_at}
+                      />
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -330,36 +400,48 @@ const RequestDetails: React.FC = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Name</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.project_name || 'N/A'}</td>
                       </tr>
-                      <tr className="bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Team Leader Name</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_name || 'N/A'}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Team Leader Phone</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_phone || 'N/A'}</td>
-                      </tr>
-                      <tr className="bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">ISP Name</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.isp_name || 'N/A'}</td>
-                      </tr>
+                      {!isReturn && (
+                        <>
+                          <tr className="bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Team Leader Name</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_name || 'N/A'}</td>
+                          </tr>
+                          <tr>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Team Leader Phone</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_phone || 'N/A'}</td>
+                          </tr>
+                          <tr className="bg-gray-50">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">ISP Name</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.isp_name || 'N/A'}</td>
+                          </tr>
+                        </>
+                      )}
                       <tr>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Location</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.location || 'N/A'}</td>
                       </tr>
+                      {isReturn && (
+                        <tr className="bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Return Reason</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.reason || 'N/A'}</td>
+                        </tr>
+                      )}
+                      {!isReturn && (
+                        <tr>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Type</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || 'N/A'}</td>
+                        </tr>
+                      )}
                       <tr className="bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Project Type</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || 'N/A'}</td>
-                      </tr>
-                      <tr>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Received By</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Received By</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.received_by || 'N/A'}</td>
                       </tr>
-                      <tr className="bg-gray-50">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Created At</td>
+                      <tr>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Created At</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.created_at).toLocaleString()}</td>
                       </tr>
-                      <tr>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Updated At</td>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Updated At</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.updated_at).toLocaleString()}</td>
                       </tr>
                     </tbody>
@@ -379,6 +461,7 @@ const RequestDetails: React.FC = () => {
               onRemoveRow={removeItemRow}
               onAddRow={addItemRow}
               isEditable={isEditable}
+              isReturn={isReturn}
             />
             <HistorySection 
               approvals={request.approvals} 
@@ -400,7 +483,7 @@ const RequestDetails: React.FC = () => {
               className="h-14"
             />
             <div className="flex-1 text-center mx-1">
-              <h1 className="text-xl font-bold uppercase tracking-wide text-gray-900">REQUEST FORM FOR MATERIALS</h1>
+              <h1 className="text-xl font-bold uppercase tracking-wide text-gray-900">{formTitle}</h1>
             </div>
             <div className="text-right bg-gray-50 border border-gray-300 rounded px-1 py-0.5">
               <StatusBadgePrint status={statusText} config={statusConfig} />
@@ -409,9 +492,11 @@ const RequestDetails: React.FC = () => {
 
           {/* Section 1: Project Information - Table Layout */}
           <section className="mb-2">
-            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Project Information</h2>
+            <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">
+              {isReturn ? 'Return Information' : 'Project Information'}
+            </h2>
             <div className="italic text-gray-600 mb-1 text-center border-b border-gray-200 pb-0.5 font-serif">
-              <p className="text-sm">Requested by: <span className="font-medium text-gray-900">{request.created_by}</span></p>
+              <p className="text-sm">{requesterLabel}: <span className="font-medium text-gray-900">{request.created_by}</span></p>
             </div>
             <div className="overflow-hidden rounded border border-gray-300">
               <table className="w-full text-xs bg-white">
@@ -420,36 +505,48 @@ const RequestDetails: React.FC = () => {
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Name</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.project_name || 'N/A'}</td>
                   </tr>
-                  <tr className="bg-gray-50 border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Team Leader Name</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_name || 'N/A'}</td>
-                  </tr>
-                  <tr className="border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Team Leader Phone</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_phone || 'N/A'}</td>
-                  </tr>
-                  <tr className="bg-gray-50 border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">ISP Name</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.isp_name || 'N/A'}</td>
-                  </tr>
+                  {!isReturn && (
+                    <>
+                      <tr className="bg-gray-50 border-b border-gray-300">
+                        <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Team Leader Name</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_name || 'N/A'}</td>
+                      </tr>
+                      <tr className="border-b border-gray-300">
+                        <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Team Leader Phone</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_phone || 'N/A'}</td>
+                      </tr>
+                      <tr className="bg-gray-50 border-b border-gray-300">
+                        <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">ISP Name</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.isp_name || 'N/A'}</td>
+                      </tr>
+                    </>
+                  )}
                   <tr className="border-b border-gray-300">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Location</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.location || 'N/A'}</td>
                   </tr>
+                  {isReturn && (
+                    <tr className="bg-gray-50 border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Return Reason</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.reason || 'N/A'}</td>
+                    </tr>
+                  )}
+                  {!isReturn && (
+                    <tr className="border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Type</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || 'N/A'}</td>
+                    </tr>
+                  )}
                   <tr className="bg-gray-50 border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Project Type</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || 'N/A'}</td>
-                  </tr>
-                  <tr className="border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Received By</td>
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Received By</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.received_by || 'N/A'}</td>
                   </tr>
-                  <tr className="bg-gray-50 border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Created At</td>
+                  <tr className="border-b border-gray-300">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Created At</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.created_at).toLocaleString()}</td>
                   </tr>
-                  <tr>
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Updated At</td>
+                  <tr className="bg-gray-50">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Updated At</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.updated_at).toLocaleString()}</td>
                   </tr>
                 </tbody>
@@ -467,8 +564,12 @@ const RequestDetails: React.FC = () => {
                 <thead>
                   <tr className="bg-gray-100">
                     <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Item Name</th>
-                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Requested</th>
-                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Received</th>
+                    {!isReturn ? (
+                      <>
+                        <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Requested</th>
+                        <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Received</th>
+                      </>
+                    ) : null}
                     <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Returned</th>
                   </tr>
                 </thead>
@@ -476,9 +577,13 @@ const RequestDetails: React.FC = () => {
                   {request.items.map((item, index) => (
                     <tr key={index}>
                       <td className="border border-gray-300 px-3 py-1.5 font-medium text-gray-900 text-xs">{item.item_name}</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_requested || 0}</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || 'N/A'}</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_returned || 'N/A'}</td>
+                      {!isReturn ? (
+                        <>
+                          <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_requested || 0}</td>
+                          <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || 'N/A'}</td>
+                        </>
+                      ) : null}
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_received || 'N/A') : (item.quantity_returned || 'N/A')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -716,6 +821,28 @@ const DetailField: React.FC<DetailFieldProps> = ({ label, value, editing, onChan
   </div>
 );
 
+interface ReasonFieldProps {
+  label: string;
+  value: string;
+  editing?: boolean;
+  onChange?: (value: string) => void;
+}
+
+const ReasonField: React.FC<ReasonFieldProps> = ({ label, value, editing, onChange }) => (
+  <div>
+    <label className="block text-sm font-medium text-gray-600">{label}</label>
+    {editing && onChange ? (
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-md border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[80px]"
+      />
+    ) : (
+      <p className="mt-1 text-base font-medium text-gray-800">{value}</p>
+    )}
+  </div>
+);
+
 interface DeploymentTypeFieldProps {
   value: string | undefined;
   editing: boolean;
@@ -761,6 +888,7 @@ interface ItemsTableProps {
   onRemoveRow: (index: number) => void;
   onAddRow: () => void;
   isEditable: boolean;
+  isReturn: boolean;
 }
 
 const ItemsTable: React.FC<ItemsTableProps> = ({
@@ -770,7 +898,8 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
   onItemChange,
   onRemoveRow,
   onAddRow,
-  isEditable
+  isEditable,
+  isReturn
 }) => (
   <div>
     <div className="flex items-center justify-between mb-4">
@@ -786,8 +915,12 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
         <thead className="bg-gray-100">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Item Name</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Requested</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Received</th>
+            {!isReturn ? (
+              <>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Requested</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Received</th>
+              </>
+            ) : null}
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Returned</th>
             {editing && <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>}
           </tr>
@@ -802,6 +935,7 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
               allItems={allItems}
               onItemChange={onItemChange}
               onRemoveRow={onRemoveRow}
+              isReturn={isReturn}
             />
           ))}
         </tbody>
@@ -817,6 +951,7 @@ interface ItemRowProps {
   allItems: any[];
   onItemChange: (index: number, field: string, value: any) => void;
   onRemoveRow: (index: number) => void;
+  isReturn: boolean;
 }
 
 const ItemRow: React.FC<ItemRowProps> = ({
@@ -825,7 +960,8 @@ const ItemRow: React.FC<ItemRowProps> = ({
   editing,
   allItems,
   onItemChange,
-  onRemoveRow
+  onRemoveRow,
+  isReturn
 }) => (
   <tr className="hover:bg-gray-50">
     {editing ? (
@@ -842,24 +978,28 @@ const ItemRow: React.FC<ItemRowProps> = ({
             </SelectContent>
           </Select>
         </td>
-        <td className="px-4 py-3">
-          <Input
-            type="number"
-            value={item.requested}
-            onChange={(e) => onItemChange(index, 'requested', parseInt(e.target.value) || 0)}
-            className="w-20 rounded-md border-gray-300"
-            min="0"
-          />
-        </td>
-        <td className="px-4 py-3">
-          <Input
-            type="number"
-            value={item.received || 0}
-            onChange={(e) => onItemChange(index, 'received', parseInt(e.target.value) || 0)}
-            className="w-20 rounded-md border-gray-300"
-            min="0"
-          />
-        </td>
+        {!isReturn ? (
+          <>
+            <td className="px-4 py-3">
+              <Input
+                type="number"
+                value={item.requested}
+                onChange={(e) => onItemChange(index, 'requested', parseInt(e.target.value) || 0)}
+                className="w-20 rounded-md border-gray-300"
+                min="0"
+              />
+            </td>
+            <td className="px-4 py-3">
+              <Input
+                type="number"
+                value={item.received || 0}
+                onChange={(e) => onItemChange(index, 'received', parseInt(e.target.value) || 0)}
+                className="w-20 rounded-md border-gray-300"
+                min="0"
+              />
+            </td>
+          </>
+        ) : null}
         <td className="px-4 py-3">
           <Input
             type="number"
@@ -883,9 +1023,13 @@ const ItemRow: React.FC<ItemRowProps> = ({
     ) : (
       <>
         <td className="px-4 py-3 text-sm font-medium text-gray-800">{item.item_name || item.name}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_requested || item.requested || 0}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || 'N/A'}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_returned || item.returned || 'N/A'}</td>
+        {!isReturn ? (
+          <>
+            <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_requested || item.requested || 0}</td>
+            <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || 'N/A'}</td>
+          </>
+        ) : null}
+        <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_received || item.received || 'N/A') : (item.quantity_returned || item.returned || 'N/A')}</td>
       </>
     )}
   </tr>

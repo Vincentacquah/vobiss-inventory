@@ -64,6 +64,11 @@ const AuditLogs = () => {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Helper to get request/return label
+  const getRequestTypeLabel = (type?: string) => {
+    return type === 'item_return' ? 'return' : 'request';
+  };
+
   // Render details based on action for better readability
   const renderDetails = (action, details) => {
     if (!details) return 'No details';
@@ -71,13 +76,16 @@ const AuditLogs = () => {
       const parsedDetails = typeof details === 'string' ? JSON.parse(details) : details;
       switch (action) {
         case 'approve_request':
-          return `Approved request ID: ${parsedDetails.request_id || 'N/A'} as ${parsedDetails.approver_name || 'Unknown'}`;
+          return `Approved ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'} as ${parsedDetails.approver_name || 'Unknown'}`;
         case 'create_request':
-          return `Created request ID: ${parsedDetails.request_id || 'N/A'}`;
+          return `Created ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'}`;
+        case 'update_request':
+        case 'update_return':
+          return `Updated ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'}`;
         case 'reject_request':
-          return `Rejected request ID: ${parsedDetails.request_id || 'N/A'}`;
+          return `Rejected ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'}`;
         case 'finalize_request':
-          return `Finalized request ID: ${parsedDetails.request_id || 'N/A'} released by: ${parsedDetails.released_by || 'Unknown'}`;
+          return `Finalized ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'} released by: ${parsedDetails.released_by || 'Unknown'}`;
         case 'create_user':
           return `Created user: ${parsedDetails.username || 'N/A'} (${parsedDetails.role || 'N/A'})`;
         case 'reset_password':
@@ -87,17 +95,17 @@ const AuditLogs = () => {
         case 'create_item':
           return `Created item: ${parsedDetails.item_name || 'N/A'}`;
         case 'update_item':
-          return `Updated item ID: ${parsedDetails.item_id || 'N/A'} (reason: ${parsedDetails.reason || 'N/A'})`;
+          return `Updated item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'}) - reason: ${parsedDetails.reason || 'N/A'}`;
         case 'delete_item':
-          return `Deleted item ID: ${parsedDetails.item_id || 'N/A'}`;
+          return `Deleted item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'})`;
         case 'issue_item':
-          return `Issued ${parsedDetails.quantity || 'N/A'} of item ID: ${parsedDetails.item_id || 'N/A'} to: ${parsedDetails.person_name || 'N/A'}`;
+          return `Issued ${parsedDetails.quantity || 'N/A'} of item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'}) to: ${parsedDetails.person_name || 'N/A'}`;
         case 'create_category':
           return `Created category: ${parsedDetails.category_name || 'N/A'}`;
         case 'update_category':
-          return `Updated category ID: ${parsedDetails.category_id || 'N/A'}`;
+          return `Updated category "${parsedDetails.category_name || 'N/A'}" (ID: ${parsedDetails.category_id || 'N/A'})`;
         case 'delete_category':
-          return `Deleted category ID: ${parsedDetails.category_id || 'N/A'}`;
+          return `Deleted category "${parsedDetails.category_name || 'N/A'}" (ID: ${parsedDetails.category_id || 'N/A'})`;
         default:
           return (
             <pre className="bg-gray-50 p-3 rounded-md text-xs overflow-auto max-h-20">

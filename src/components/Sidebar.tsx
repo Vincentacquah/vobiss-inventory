@@ -1,4 +1,4 @@
-// Updated Sidebar.tsx with role-based menu filtering (remove Approved Forms for Approver)
+// Updated Sidebar.tsx with Item Returns menu item
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -15,7 +15,8 @@ import {
   CheckCircle,
   LogOut,
   FileText as AuditIcon,
-  Users
+  Users,
+  ArrowLeftCircle // New import for returns icon
 } from 'lucide-react';
 import { getRequests, getLowStockItems } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -72,7 +73,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
     setIsLoggingOut(false);
   };
 
-  // Role-based menu items
+  // Role-based menu items (updated with Item Returns)
   const getMenuItems = () => {
     const baseItems = [
       { icon: BarChart3, label: 'Dashboard', path: '/' },
@@ -84,6 +85,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
 
     const requestFormsItems = [
       { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
+      { icon: ArrowLeftCircle, label: 'Item Returns', path: '/item-returns' }, // New menu item
     ];
 
     const approvalsItems = [
@@ -109,10 +111,10 @@ const Sidebar = ({ isOpen, onToggle }) => {
     let menuItems = [...baseItems];
 
     if (role === 'requester') {
-      // Only Request Forms
+      // Request Forms + Item Returns
       menuItems = [...requestFormsItems];
     } else if (role === 'approver') {
-      // Request Forms + Pending Approvals (no Approved Forms)
+      // Request Forms + Item Returns + Pending Approvals (no Approved Forms)
       menuItems = [...requestFormsItems, ...approvalsItems];
     } else if (role === 'issuer') {
       // Everything except Users, Pending Approvals, Settings

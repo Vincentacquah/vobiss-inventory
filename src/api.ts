@@ -1,3 +1,4 @@
+// Updated api.ts with support for item returns (type and reason fields)
 const API_URL = 'http://localhost:3001/api';
 
 // Helper to get auth header
@@ -76,6 +77,8 @@ interface Request {
   deployment_type: 'Deployment' | 'Maintenance';
   release_by: string | null;
   received_by: string | null;
+  type: 'material_request' | 'item_return'; // Added type
+  reason?: string; // Added reason
   status: 'pending' | 'approved' | 'completed' | 'rejected';
   created_at: string;
   updated_at: string;
@@ -589,23 +592,24 @@ export const getDashboardStats = async (): Promise<{
 // Requests
 export const createRequest = async (requestData: {
   createdBy: string;
-  teamLeaderName: string;
-  teamLeaderPhone: string;
+  teamLeaderName?: string; // Optional for returns
+  teamLeaderPhone?: string; // Optional for returns
   projectName: string;
-  ispName: string | null;
+  ispName?: string | null; // Optional for returns
   location: string;
-  deployment: 'Deployment' | 'Maintenance';
-  releaseBy: string | null;
-  receivedBy: string | null;
+  deployment?: 'Deployment' | 'Maintenance'; // Optional for returns
+  releaseBy?: string | null; // Optional for returns
+  receivedBy?: string | null; // Optional for returns
+  reason?: string; // Optional for requests, required for returns
   items: { name: string; requested: number }[];
-}, selectedApproverId: number): Promise<Request> => {
+}, selectedApproverId: number, type: 'material_request' | 'item_return' = 'material_request'): Promise<Request> => {
   try {
     const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ...requestData, selectedApproverId }),
+      body: JSON.stringify({ ...requestData, selectedApproverId, type }),
     });
     return await response.json();
   } catch (error) {
@@ -630,12 +634,13 @@ export const getRequests = async (): Promise<Request[]> => {
 
 export const updateRequest = async (id: string | number, requestData: {
   createdBy: string;
-  teamLeaderName: string;
-  teamLeaderPhone: string;
+  teamLeaderName?: string;
+  teamLeaderPhone?: string;
   projectName: string;
-  ispName: string | null;
+  ispName?: string | null;
   location: string;
-  deployment: 'Deployment' | 'Maintenance';
+  deployment?: 'Deployment' | 'Maintenance';
+  reason?: string;
   items: { name: string; requested: number }[];
 }): Promise<{ message: string }> => {
   try {

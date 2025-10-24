@@ -1,4 +1,4 @@
-// Updated db.js with selected_approver_id support
+// Updated db.js with type and reason support for requests/returns
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -197,7 +197,7 @@ export async function initDB() {
       );
     `, 'items_out');
 
-    // Requests table
+    // Requests table (updated with type and reason)
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS requests (
         id SERIAL PRIMARY KEY,
@@ -211,23 +211,31 @@ export async function initDB() {
         release_by VARCHAR(255),
         received_by VARCHAR(255),
         selected_approver_id INTEGER REFERENCES users(id),
+        type VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return')),
+        reason TEXT,
         status VARCHAR(50) DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP
       );
     `, 'requests');
 
-    // Migrate selected_approver_id if needed
+    // Migrate selected_approver_id, type, and reason if needed
     try {
       await pool.query(`
         ALTER TABLE requests ADD COLUMN IF NOT EXISTS selected_approver_id INTEGER REFERENCES users(id);
       `);
-      console.log('Requests selected_approver_id migration completed.');
+      await pool.query(`
+        ALTER TABLE requests ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return'));
+      `);
+      await pool.query(`
+        ALTER TABLE requests ADD COLUMN IF NOT EXISTS reason TEXT;
+      `);
+      console.log('Requests migrations (approver_id, type, reason) completed.');
     } catch (alterError) {
       if (!alterError.message.includes('already exists')) {
         console.warn('Warning during requests schema migration:', alterError.message);
       } else {
-        console.log('Requests migration skipped (already applied).');
+        console.log('Requests migrations skipped (already applied).');
       }
     }
 
@@ -1055,15 +1063,24 @@ export async function getDashboardStats() {
   }
 }
 
-// Updated Requests functions with selected_approver_id and audit logging
-export async function createRequest(requestData, selectedApproverId, userId, ip) {
+// Updated createRequest function in db.js to handle defaults for returns
+export async function createRequest(requestData, selectedApproverId, requestType = 'material_request', userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, releaseBy, receivedBy, items } = requestData;
+    let { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, releaseBy, receivedBy, items, reason } = requestData;
+    
+    // Set defaults for return requests or missing fields
+    const teamLeaderNameValue = teamLeaderName || createdBy || '';
+    const teamLeaderPhoneValue = teamLeaderPhone || '';
+    const ispNameValue = ispName || null;
+    const deploymentValue = deployment || null;
+    const releaseByValue = releaseBy || null;
+    const receivedByValue = receivedBy || null;
+    
     const requestResult = await client.query(
-      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, selected_approver_id, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP) RETURNING *',
-      [createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, releaseBy || null, receivedBy || null, selectedApproverId, 'pending']
+      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, selected_approver_id, type, reason, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP) RETURNING *',
+      [createdBy, teamLeaderNameValue, teamLeaderPhoneValue, projectName, ispNameValue, location, deploymentValue, releaseByValue, receivedByValue, selectedApproverId, requestType, reason || null, 'pending']
     );
     const requestId = requestResult.rows[0].id;
     for (const item of items) {
@@ -1077,7 +1094,7 @@ export async function createRequest(requestData, selectedApproverId, userId, ip)
     }
 
     // Log audit
-    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_id: selectedApproverId });
+    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_id: selectedApproverId, type: requestType });
 
     await client.query('COMMIT');
     return requestResult.rows[0];
@@ -1093,7 +1110,7 @@ export async function createRequest(requestData, selectedApproverId, userId, ip)
 export async function getRequests(userRole, userId) {
   try {
     let query = `
-      SELECT r.*, 
+      SELECT r.*, r.type, r.reason,
              (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS reject_reason,
              COUNT(ri.id) AS item_count,
              COALESCE(u.first_name || ' ' || u.last_name, 'Unassigned') AS approver_name
@@ -1102,7 +1119,7 @@ export async function getRequests(userRole, userId) {
       LEFT JOIN users u ON r.selected_approver_id = u.id
     `;
     let params = [];
-    let whereClause = ' GROUP BY r.id, reject_reason, u.first_name, u.last_name';
+    let whereClause = ' GROUP BY r.id, r.type, r.reason, reject_reason, u.first_name, u.last_name';
     let orderBy = ' ORDER BY r.created_at DESC';
 
     if (userRole === 'approver') {
@@ -1124,11 +1141,11 @@ export async function updateRequest(requestId, requestData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, items } = requestData;
+    const { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, items, reason } = requestData;
     // Update main request
     await client.query(
-      'UPDATE requests SET team_leader_name = $1, team_leader_phone = $2, project_name = $3, isp_name = $4, location = $5, deployment_type = $6, updated_at = CURRENT_TIMESTAMP WHERE id = $7',
-      [teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, requestId]
+      'UPDATE requests SET team_leader_name = $1, team_leader_phone = $2, project_name = $3, isp_name = $4, location = $5, deployment_type = $6, reason = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8',
+      [teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, reason || null, requestId]
     );
     // Delete old items and re-insert (simple approach; adjust if needed)
     await client.query('DELETE FROM request_items WHERE request_id = $1', [requestId]);
@@ -1221,16 +1238,18 @@ export async function approveRequest(requestId, approverData, userId, ip) {
   }
 }
 
+// Updated finalizeRequest to handle returns (add to stock) vs requests (deduct from stock)
 export async function finalizeRequest(requestId, items, releasedBy, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const request = await client.query(
-      'SELECT status FROM requests WHERE id = $1',
+      'SELECT status, type FROM requests WHERE id = $1',
       [requestId]
     );
     if (request.rowCount === 0) throw new Error('Request not found');
     if (request.rows[0].status !== 'approved') throw new Error('Request is not approved');
+    const reqType = request.rows[0].type;
     for (const item of items) {
       const { itemId, quantityReceived, quantityReturned } = item;
       const itemCheck = await client.query(
@@ -1238,21 +1257,29 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
         [itemId]
       );
       if (itemCheck.rowCount === 0) throw new Error('Item not found');
-      const availableQuantity = parseInt(itemCheck.rows[0].quantity, 10);
-      const quantityToDeduct = parseInt(quantityReceived) || 0;
-      if (quantityToDeduct > availableQuantity) {
-        throw new Error(`Insufficient stock for item ID ${itemId}. Only ${availableQuantity} units available.`);
+      const currentQuantity = parseInt(itemCheck.rows[0].quantity, 10);
+      const quantityToAdjust = parseInt(quantityReceived) || 0;
+      if (quantityToAdjust <= 0) continue; // Skip if no quantity
+      if (reqType === 'material_request') {
+        // For requests: deduct (check availability)
+        if (quantityToAdjust > currentQuantity) {
+          throw new Error(`Insufficient stock for item ID ${itemId}. Only ${currentQuantity} units available.`);
+        }
+        await client.query(
+          'UPDATE items SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [quantityToAdjust, itemId]
+        );
+      } else if (reqType === 'item_return') {
+        // For returns: add back to stock (no availability check needed)
+        await client.query(
+          'UPDATE items SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [quantityToAdjust, itemId]
+        );
       }
       await client.query(
         'UPDATE request_items SET quantity_received = $1, quantity_returned = $2, updated_at = CURRENT_TIMESTAMP WHERE request_id = $3 AND item_id = $4',
         [quantityReceived || null, quantityReturned || null, requestId, itemId]
       );
-      if (quantityToDeduct > 0) {
-        await client.query(
-          'UPDATE items SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-          [quantityToDeduct, itemId]
-        );
-      }
     }
     await client.query(
       'UPDATE requests SET status = $1, release_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
@@ -1260,7 +1287,7 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
     );
 
     // Log audit
-    await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy });
+    await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy, type: reqType });
 
     await client.query('COMMIT');
     return { message: 'Request finalized' };

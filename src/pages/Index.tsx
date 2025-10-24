@@ -1,4 +1,4 @@
-// Updated Index.tsx with updated ProtectedRoute for Approved Forms (exclude approver)
+// Updated Index.tsx with Item Returns routes
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
@@ -13,6 +13,7 @@ import AIAssistant from './AIAssistant';
 import SettingsPage from './SettingsPage';
 import SupervisorsPage from './SupervisorsPage';
 import RequestForms from './RequestForms';
+import ItemReturns from './ItemReturns'; // New import
 import PendingApprovals from './PendingApprovals';
 import ApprovedForms from './ApprovedForms';
 import RequestDetails from './RequestDetails';
@@ -56,6 +57,10 @@ const Index = () => {
               {/* Request Forms - requester, approver, issuer, superadmin */}
               <Route path="/request-forms" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><RequestForms /></ProtectedRoute>} />
               <Route path="/request-forms/:id" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><RequestDetails /></ProtectedRoute>} />
+              
+              {/* Item Returns - requester, approver, issuer, superadmin */}
+              <Route path="/item-returns" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><ItemReturns /></ProtectedRoute>} />
+              <Route path="/item-returns/:id" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><RequestDetails /></ProtectedRoute>} />
               
               {/* Pending Approvals - approver, superadmin only */}
               <Route path="/pending-approvals" element={<ProtectedRoute allowedRoles={['approver', 'superadmin']}><PendingApprovals /></ProtectedRoute>} />

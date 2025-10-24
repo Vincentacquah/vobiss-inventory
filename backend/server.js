@@ -1,4 +1,4 @@
-// Updated server.js with approvers endpoint and filtered requests
+// Updated server.js to handle type and reason in requests
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -563,15 +563,15 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Updated Requests Routes (add auth, role checks if needed)
+// Updated Requests Routes (add support for type and reason)
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
-    const { selectedApproverId, ...requestData } = req.body;
+    const { selectedApproverId, type = 'material_request', ...requestData } = req.body;
     if (!selectedApproverId) {
       return res.status(400).json({ error: 'Selected approver is required' });
     }
     const ip = getClientIp(req);
-    const request = await createRequest(requestData, parseInt(selectedApproverId), req.user.id, ip);
+    const request = await createRequest(requestData, parseInt(selectedApproverId), type, req.user.id, ip);
     res.status(201).json(request);
   } catch (error) {
     console.error('Error creating request:', error.stack);
