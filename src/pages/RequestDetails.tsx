@@ -583,7 +583,7 @@ const RequestDetails: React.FC = () => {
                           <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || 'N/A'}</td>
                         </>
                       ) : null}
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_received || 'N/A') : (item.quantity_returned || 'N/A')}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_requested || 0) : (item.quantity_returned || 'N/A')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1029,7 +1029,7 @@ const ItemRow: React.FC<ItemRowProps> = ({
             <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || 'N/A'}</td>
           </>
         ) : null}
-        <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_received || item.received || 'N/A') : (item.quantity_returned || item.returned || 'N/A')}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_requested || item.requested || 0) : (item.quantity_returned || item.returned || 'N/A')}</td>
       </>
     )}
   </tr>

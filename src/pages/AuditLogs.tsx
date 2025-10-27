@@ -1,6 +1,7 @@
 // src/pages/AuditLogs.tsx
 import React, { useState, useEffect } from 'react';
 import { getAuditLogs } from '../api';
+import * as XLSX from 'xlsx';
 
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
@@ -9,15 +10,18 @@ const AuditLogs = () => {
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState('All');
-  const [sortBy, setSortBy] = useState('timestamp'); // Default sort by timestamp desc
+  const [sortBy, setSortBy] = useState('user'); // Default sort by user
   const [loginStats, setLoginStats] = useState({ totalToday: 0, usersToday: {} });
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showAll, setShowAll] = useState(false);
+  const [ipInfo, setIpInfo] = useState({}); // Cache for IP geo data
+  const [currentPublicIP, setCurrentPublicIP] = useState('Loading...'); // Current viewer's public IP
 
   useEffect(() => {
     const fetchLogs = async () => {
       try {
         const data = await getAuditLogs();
         setLogs(data);
-        setFilteredLogs(data);
         calculateLoginStats(data);
       } catch (err) {
         setError('Failed to load audit logs');
@@ -29,7 +33,82 @@ const AuditLogs = () => {
     fetchLogs();
   }, []);
 
-  // Calculate daily login stats (group by user and date)
+  // Fetch current public IP on mount
+  useEffect(() => {
+    const fetchCurrentPublicIP = async () => {
+      try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        if (response.ok) {
+          const data = await response.json();
+          setCurrentPublicIP(data.ip);
+        } else {
+          setCurrentPublicIP('Unable to fetch');
+        }
+      } catch (err) {
+        console.error('Public IP fetch failed:', err);
+        setCurrentPublicIP('Unable to fetch');
+      }
+    };
+
+    fetchCurrentPublicIP();
+  }, []);
+
+  // Refresh public IP button handler
+  const refreshPublicIP = async () => {
+    setCurrentPublicIP('Loading...');
+    // Re-run the fetch logic
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentPublicIP(data.ip);
+      } else {
+        setCurrentPublicIP('Unable to fetch');
+      }
+    } catch (err) {
+      console.error('Public IP refresh failed:', err);
+      setCurrentPublicIP('Unable to fetch');
+    }
+  };
+
+  // Helper to check if IP is local/loopback
+  const isLocalIP = (ip) => {
+    return ip === '::1' || ip === '127.0.0.1' || ip === '0.0.0.0' || ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.16.');
+  };
+
+  // Fetch IP info for login events automatically
+  useEffect(() => {
+    const fetchLoginIpInfos = async () => {
+      // Collect unique IPs from login actions in current filtered logs
+      const loginIps = [...new Set(
+        filteredLogs
+          .filter(log => log.action === 'login')
+          .map(log => log.ip_address)
+          .filter(ip => ip && !ipInfo[ip] && !isLocalIP(ip)) // Skip local IPs and cached ones
+      )];
+
+      if (loginIps.length === 0) return;
+
+      // Fetch in parallel for efficiency
+      const fetchPromises = loginIps.map(async (ip) => {
+        try {
+          const response = await fetch(`https://ipapi.co/${ip}/json/`);
+          if (response.ok) {
+            const data = await response.json();
+            setIpInfo(prev => ({ ...prev, [ip]: data }));
+          }
+        } catch (err) {
+          console.error(`IP lookup failed for ${ip}:`, err);
+        }
+      });
+
+      await Promise.all(fetchPromises);
+    };
+
+    fetchLoginIpInfos();
+  }, [filteredLogs]); // Re-run when filteredLogs change (e.g., new filters show new logins)
+
+  // Calculate daily login stats (group by user and date) - always for today
   const calculateLoginStats = (allLogs) => {
     const today = new Date().toDateString();
     const stats = { totalToday: 0, usersToday: {} };
@@ -45,6 +124,33 @@ const AuditLogs = () => {
     });
 
     setLoginStats(stats);
+  };
+
+  // Export to Excel (include geo info if available for logins, and public fallback)
+  const exportToExcel = () => {
+    const exportData = filteredLogs.map((log) => {
+      let geo = '';
+      if (log.action === 'login') {
+        if (isLocalIP(log.ip_address)) {
+          geo = ` (Localhost - Public: ${currentPublicIP})`;
+        } else if (ipInfo[log.ip_address]) {
+          geo = ` (${ipInfo[log.ip_address].city || 'N/A'}, ${ipInfo[log.ip_address].country_name || 'N/A'})`;
+        }
+      }
+      return {
+        'Date & Time': `${formatDate(log.timestamp)} ${formatTime(log.timestamp)}`,
+        User: log.full_name || log.username || 'N/A',
+        Action: log.action.replace(/_/g, ' '),
+        'IP Address': `${log.ip_address}${geo}`,
+        Details: log.details ? (typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details) : 'No details',
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Audit Logs');
+    const fileName = showAll ? 'All_Audit_Logs.xlsx' : `Audit_Logs_${filterDate}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   };
 
   // Format date as "Tuesday dd/mm/yyyy"
@@ -126,6 +232,12 @@ const AuditLogs = () => {
   useEffect(() => {
     let filtered = [...logs];
 
+    // Date filter
+    if (!showAll && filterDate) {
+      const targetDateStr = new Date(filterDate).toDateString();
+      filtered = filtered.filter(log => new Date(log.timestamp).toDateString() === targetDateStr);
+    }
+
     // Search filter
     if (searchTerm) {
       filtered = filtered.filter(log =>
@@ -153,7 +265,7 @@ const AuditLogs = () => {
     });
 
     setFilteredLogs(filtered);
-  }, [logs, searchTerm, selectedUser, sortBy]);
+  }, [logs, searchTerm, selectedUser, sortBy, showAll, filterDate]);
 
   if (loading) {
     return (
@@ -183,13 +295,26 @@ const AuditLogs = () => {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Audit Logs</h1>
-        <p className="text-gray-600">Track all user activities, including logins, creations, updates, deletions, and approvals for enhanced security.</p>
+      {/* Header with Refresh Button */}
+      <div className="mb-6 flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Audit Logs</h1>
+          <p className="text-gray-600">Track all user activities, including logins, creations, updates, deletions, and approvals for enhanced security.</p>
+        </div>
+        <button
+          onClick={refreshPublicIP}
+          className="bg-white hover:bg-gray-50 text-indigo-600 px-4 py-2 rounded-lg text-sm font-medium border border-indigo-200 shadow-sm transition-all duration-200 hover:shadow-md hover:border-indigo-300 flex items-center space-x-2"
+          disabled={currentPublicIP === 'Loading...'}
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Refresh IP</span>
+        </button>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center">
             <div className="p-3 rounded-full bg-blue-100">
@@ -229,11 +354,31 @@ const AuditLogs = () => {
             </div>
           </div>
         </div>
+        {/* Enhanced IP Card - Without Refresh Button */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 to-blue-50 opacity-50"></div>
+          <div className="relative flex items-center">
+            <div className="flex items-center">
+              <div className="p-3 rounded-full bg-gradient-to-r from-indigo-500 to-blue-600 shadow-lg">
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                </svg>
+              </div>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-600">Your Public IP</p>
+                <p className={`text-xl font-bold ${currentPublicIP === 'Loading...' ? 'text-gray-400' : 'text-gray-900'}`}>
+                  {currentPublicIP}
+                </p>
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">Live fetch for development/testing</p>
+        </div>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
             <input
@@ -264,83 +409,37 @@ const AuditLogs = () => {
               onChange={(e) => setSortBy(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
+              <option value="user">User</option>
               <option value="timestamp">Latest First</option>
               <option value="action">Action</option>
-              <option value="user">User</option>
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
-          <p className="text-sm text-gray-500">Showing {filteredLogs.length} of {logs.length} entries</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">IP Address</th>
-                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Details</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{formatDate(log.timestamp)}</div>
-                    <div className="text-sm text-gray-500">{formatTime(log.timestamp)}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">{log.full_name || log.username || 'N/A'}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${
-                      log.action === 'login' ? 'bg-green-100 text-green-800' :
-                      log.action === 'logout' ? 'bg-gray-100 text-gray-800' :
-                      log.action.includes('create') ? 'bg-blue-100 text-blue-800' :
-                      log.action.includes('update') ? 'bg-yellow-100 text-yellow-800' :
-                      log.action.includes('delete') ? 'bg-red-100 text-red-800' :
-                      log.action.includes('approve') ? 'bg-purple-100 text-purple-800' :
-                      log.action.includes('reject') ? 'bg-orange-100 text-orange-800' :
-                      log.action.includes('issue') ? 'bg-indigo-100 text-indigo-800' : 'bg-indigo-100 text-indigo-800'
-                    }`}>
-                      {log.action.replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <a href={`https://whatismyipaddress.com/ip/${log.ip_address}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                      {log.ip_address}
-                    </a>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-gray-900 max-w-md">
-                      {renderDetails(log.action, log.details)}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filteredLogs.length === 0 && (
-          <div className="px-6 py-12 text-center text-gray-500">
-            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-            </svg>
-            <h3 className="mt-2 text-sm font-medium">No audit logs</h3>
-            <p className="mt-1 text-sm">No activities match the selected filters.</p>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Date Filter</label>
+            <div className="space-y-2">
+              <input
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                disabled={showAll}
+                className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${showAll ? 'bg-gray-100' : ''}`}
+              />
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={showAll}
+                  onChange={(e) => setShowAll(e.target.checked)}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <span className="ml-2 text-sm text-gray-700">Show All</span>
+              </label>
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Login Stats Table */}
-      <div className="mt-8">
+      {/* Today's Login Summary - Moved to top */}
+      <div className="mb-6">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Today's Login Summary</h2>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
           <table className="min-w-full divide-y divide-gray-200">
@@ -372,6 +471,100 @@ const AuditLogs = () => {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
+            <p className="text-sm text-gray-500">Showing {filteredLogs.length} of {logs.length} entries</p>
+          </div>
+          <button
+            onClick={exportToExcel}
+            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            Export to Excel
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Date & Time</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">User</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Action</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">IP Address</th>
+                <th className="px-6 py-4 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Details</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredLogs.map((log) => {
+                const isLogin = log.action === 'login';
+                const isLocal = isLocalIP(log.ip_address);
+                const geoInfo = isLogin && !isLocal && ipInfo[log.ip_address];
+                let ipDisplay = log.ip_address;
+                let ipSuffix = '';
+                if (isLogin) {
+                  if (isLocal && currentPublicIP !== 'Loading...' && currentPublicIP !== 'Unable to fetch') {
+                    ipSuffix = ` (Public: ${currentPublicIP})`; // Dev fallback
+                  } else if (!isLocal) {
+                    ipSuffix = geoInfo ? ` (${geoInfo.city || 'N/A'}, ${geoInfo.country_name || 'N/A'})` : ' Fetching...';
+                  } else {
+                    ipSuffix = ' (Localhost)';
+                  }
+                }
+                return (
+                  <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{formatDate(log.timestamp)}</div>
+                      <div className="text-sm text-gray-500">{formatTime(log.timestamp)}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{log.full_name || log.username || 'N/A'}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${
+                        log.action === 'login' ? 'bg-green-100 text-green-800' :
+                        log.action === 'logout' ? 'bg-gray-100 text-gray-800' :
+                        log.action.includes('create') ? 'bg-blue-100 text-blue-800' :
+                        log.action.includes('update') ? 'bg-yellow-100 text-yellow-800' :
+                        log.action.includes('delete') ? 'bg-red-100 text-red-800' :
+                        log.action.includes('approve') ? 'bg-purple-100 text-purple-800' :
+                        log.action.includes('reject') ? 'bg-orange-100 text-orange-800' :
+                        log.action.includes('issue') ? 'bg-indigo-100 text-indigo-800' : 'bg-indigo-100 text-indigo-800'
+                      }`}>
+                        {log.action.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <div className="flex items-center space-x-2">
+                        <a href={`https://whatismyipaddress.com/ip/${log.ip_address}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                          {ipDisplay}
+                        </a>
+                        {isLogin && <span className={`text-xs ${isLocal ? 'text-gray-600' : geoInfo ? 'text-gray-600' : 'text-gray-400 italic'}`}>{ipSuffix}</span>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-gray-900 max-w-md">
+                        {renderDetails(log.action, log.details)}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {filteredLogs.length === 0 && (
+          <div className="px-6 py-12 text-center text-gray-500">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            <h3 className="mt-2 text-sm font-medium">No audit logs</h3>
+            <p className="mt-1 text-sm">No activities match the selected filters.</p>
+          </div>
+        )}
       </div>
     </div>
   );
