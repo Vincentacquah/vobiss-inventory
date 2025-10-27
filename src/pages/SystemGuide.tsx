@@ -1,9 +1,4 @@
-SUPABASE_URL=https://srvvomvtrlnsyrzujazp.supabase.co
-SUPABASE_KEY=eyJHbGc101JUJZi1NItsiNR5CiG1tkPXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNydnZvbXZ0cmxuc3lyenVqYXpwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTcyNzMyMDExNSwiZXhwIjoxMDQyNjAwMTE1fQ.pC3M1f01J2dXbI
-PORT=3001
-
-
-// Updated SystemGuide.tsx with embedded demo video tutorial
+// Updated SystemGuide.tsx with CopyButton moved before sections to fix initialization error
 import React, { useState } from 'react';
 import { 
   Search, 
@@ -24,11 +19,10 @@ import {
   Bot,
   Mail,
   BookOpen,
-  HelpCircle,
-  PlayCircle // New icon for video section
+  HelpCircle
 } from 'lucide-react';
 
-// Simple CopyButton Component
+// Simple CopyButton Component (moved before sections)
 const CopyButton = ({ code }: { code: string }) => {
   const [copied, setCopied] = useState(false);
 
@@ -472,28 +466,6 @@ const SystemGuide = () => {
           Welcome to the Vobiss Inventory System, a platform designed to help manage company inventory, process item requests, and handle approvals efficiently.
           This guide explains how to use the system based on your role and available features.
         </p>
-
-        {/* Demo Video Section */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center space-x-2">
-            <PlayCircle className="h-6 w-6 text-blue-600" />
-            <span>Watch Demo Tutorial</span>
-          </h2>
-          <p className="text-gray-600 mb-4">Get a visual walkthrough of building and using a React-based inventory management system similar to Vobiss.</p>
-          <div className="relative w-full aspect-video rounded-lg overflow-hidden shadow-inner">
-            <iframe
-              className="w-full h-full"
-              src="https://www.youtube.com/embed/s1IXx0GU2i4"
-              title="Build Your OWN React Inventory Management System NOW!"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              referrerPolicy="strict-origin-when-cross-origin"
-              allowFullScreen
-            ></iframe>
-          </div>
-          <p className="text-sm text-gray-500 mt-4 text-center">
-            Video: Build Your OWN React Inventory Management System NOW!<grok-card data-id="e193bb" data-type="citation_card"></grok-card>
-          </p>
-        </div>
 
         {/* No results */}
         {filteredSections.length === 0 && searchTerm && (

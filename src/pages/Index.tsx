@@ -1,8 +1,8 @@
-// Updated Index.tsx with Item Returns routes
+// Updated Index.tsx with System Guide route
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
-import ProtectedRoute from '../components/ProtectedRoute'; // New import
+import ProtectedRoute from '../components/ProtectedRoute';
 import Dashboard from './Dashboard';
 import Inventory from './Inventory';
 import Categories from './Categories';
@@ -13,12 +13,13 @@ import AIAssistant from './AIAssistant';
 import SettingsPage from './SettingsPage';
 import SupervisorsPage from './SupervisorsPage';
 import RequestForms from './RequestForms';
-import ItemReturns from './ItemReturns'; // New import
+import ItemReturns from './ItemReturns';
 import PendingApprovals from './PendingApprovals';
 import ApprovedForms from './ApprovedForms';
 import RequestDetails from './RequestDetails';
 import AuditLogs from './AuditLogs';
 import UsersPage from './UsersPage';
+import SystemGuide from './SystemGuide'; // New import
 
 const Index = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -53,6 +54,9 @@ const Index = () => {
               {/* Low Stock & Items Out - all roles */}
               <Route path="/low-stock" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><LowStockAlerts /></ProtectedRoute>} />
               <Route path="/items-out" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><ItemsOut /></ProtectedRoute>} />
+              
+              {/* System Guide - all roles */}
+              <Route path="/system-guide" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><SystemGuide /></ProtectedRoute>} />
               
               {/* Request Forms - requester, approver, issuer, superadmin */}
               <Route path="/request-forms" element={<ProtectedRoute allowedRoles={['requester', 'approver', 'issuer', 'superadmin']}><RequestForms /></ProtectedRoute>} />

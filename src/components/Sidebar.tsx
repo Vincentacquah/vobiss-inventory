@@ -1,4 +1,4 @@
-// Updated Sidebar.tsx with Item Returns menu item
+// Updated Sidebar.tsx with System Guide menu item
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -16,7 +16,8 @@ import {
   LogOut,
   FileText as AuditIcon,
   Users,
-  ArrowLeftCircle // New import for returns icon
+  ArrowLeftCircle,
+  HelpCircle // New import for System Guide icon
 } from 'lucide-react';
 import { getRequests, getLowStockItems } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -73,7 +74,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
     setIsLoggingOut(false);
   };
 
-  // Role-based menu items (updated with Item Returns)
+  // Role-based menu items (updated with System Guide)
   const getMenuItems = () => {
     const baseItems = [
       { icon: BarChart3, label: 'Dashboard', path: '/' },
@@ -81,11 +82,12 @@ const Sidebar = ({ isOpen, onToggle }) => {
       { icon: Tags, label: 'Categories', path: '/categories' },
       { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
       { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
+      { icon: HelpCircle, label: 'System Guide', path: '/system-guide' }, // New menu item
     ];
 
     const requestFormsItems = [
       { icon: ClipboardList, label: 'Request Forms', path: '/request-forms' },
-      { icon: ArrowLeftCircle, label: 'Item Returns', path: '/item-returns' }, // New menu item
+      { icon: ArrowLeftCircle, label: 'Item Returns', path: '/item-returns' },
     ];
 
     const approvalsItems = [
