@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
   const [filteredLogs, setFilteredLogs] = useState([]);
+  const [paginatedLogs, setPaginatedLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -16,6 +17,8 @@ const AuditLogs = () => {
   const [showAll, setShowAll] = useState(false);
   const [ipInfo, setIpInfo] = useState({}); // Cache for IP geo data
   const [currentPublicIP, setCurrentPublicIP] = useState('Loading...'); // Current viewer's public IP
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 20;
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -118,7 +121,7 @@ const AuditLogs = () => {
       const logDate = new Date(log.timestamp).toDateString();
       if (logDate === today) {
         stats.totalToday++;
-        const userKey = log.full_name || log.username || 'Unknown';
+        const userKey = log.full_name || log.username || 'Anonymous';
         stats.usersToday[userKey] = (stats.usersToday[userKey] || 0) + 1;
       }
     });
@@ -139,7 +142,7 @@ const AuditLogs = () => {
       }
       return {
         'Date & Time': `${formatDate(log.timestamp)} ${formatTime(log.timestamp)}`,
-        User: log.full_name || log.username || 'N/A',
+        User: log.full_name || log.username || 'Anonymous',
         Action: log.action.replace(/_/g, ' '),
         'IP Address': `${log.ip_address}${geo}`,
         Details: log.details ? (typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details) : 'No details',
@@ -201,17 +204,17 @@ const AuditLogs = () => {
         case 'create_item':
           return `Created item: ${parsedDetails.item_name || 'N/A'}`;
         case 'update_item':
-          return `Updated item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'}) - reason: ${parsedDetails.reason || 'N/A'}`;
+          return `Updated item ID: ${parsedDetails.item_id || 'N/A'} - reason: ${parsedDetails.reason || 'N/A'}`;
         case 'delete_item':
-          return `Deleted item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'})`;
+          return `Deleted item ID: ${parsedDetails.item_id || 'N/A'}`;
         case 'issue_item':
-          return `Issued ${parsedDetails.quantity || 'N/A'} of item "${parsedDetails.item_name || 'N/A'}" (ID: ${parsedDetails.item_id || 'N/A'}) to: ${parsedDetails.person_name || 'N/A'}`;
+          return `Issued ${parsedDetails.quantity || 'N/A'} of item ID: ${parsedDetails.item_id || 'N/A'} to: ${parsedDetails.person_name || 'N/A'}`;
         case 'create_category':
           return `Created category: ${parsedDetails.category_name || 'N/A'}`;
         case 'update_category':
-          return `Updated category "${parsedDetails.category_name || 'N/A'}" (ID: ${parsedDetails.category_id || 'N/A'})`;
+          return `Updated category ID: ${parsedDetails.category_id || 'N/A'}`;
         case 'delete_category':
-          return `Deleted category "${parsedDetails.category_name || 'N/A'}" (ID: ${parsedDetails.category_id || 'N/A'})`;
+          return `Deleted category ID: ${parsedDetails.category_id || 'N/A'}`;
         default:
           return (
             <pre className="bg-gray-50 p-3 rounded-md text-xs overflow-auto max-h-20">
@@ -265,7 +268,24 @@ const AuditLogs = () => {
     });
 
     setFilteredLogs(filtered);
+    setCurrentPage(1); // Reset to first page on filter change
   }, [logs, searchTerm, selectedUser, sortBy, showAll, filterDate]);
+
+  // Pagination
+  useEffect(() => {
+    const totalPages = Math.ceil(filteredLogs.length / pageSize);
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    setPaginatedLogs(filteredLogs.slice(startIndex, endIndex));
+  }, [filteredLogs, currentPage]);
+
+  const totalPages = Math.ceil(filteredLogs.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize + 1;
+  const endIndex = Math.min(currentPage * pageSize, filteredLogs.length);
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+  };
 
   if (loading) {
     return (
@@ -291,7 +311,7 @@ const AuditLogs = () => {
   }
 
   // Get unique users for filter
-  const uniqueUsers = [...new Set(logs.map(log => log.full_name || log.username || 'Unknown'))];
+  const uniqueUsers = [...new Set(logs.map(log => log.full_name || log.username || 'Anonymous'))];
 
   return (
     <div className="p-6">
@@ -478,7 +498,7 @@ const AuditLogs = () => {
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
-            <p className="text-sm text-gray-500">Showing {filteredLogs.length} of {logs.length} entries</p>
+            <p className="text-sm text-gray-500">Showing {paginatedLogs.length} of {filteredLogs.length} entries</p>
           </div>
           <button
             onClick={exportToExcel}
@@ -499,7 +519,7 @@ const AuditLogs = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredLogs.map((log) => {
+              {paginatedLogs.map((log) => {
                 const isLogin = log.action === 'login';
                 const isLocal = isLocalIP(log.ip_address);
                 const geoInfo = isLogin && !isLocal && ipInfo[log.ip_address];
@@ -514,6 +534,7 @@ const AuditLogs = () => {
                     ipSuffix = ' (Localhost)';
                   }
                 }
+                const userDisplay = log.full_name || log.username || 'Anonymous';
                 return (
                   <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -521,7 +542,9 @@ const AuditLogs = () => {
                       <div className="text-sm text-gray-500">{formatTime(log.timestamp)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{log.full_name || log.username || 'N/A'}</div>
+                      <div className={`text-sm font-medium ${userDisplay === 'Anonymous' ? 'text-gray-500 italic' : 'text-gray-900'}`}>
+                        {userDisplay}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${
@@ -563,6 +586,32 @@ const AuditLogs = () => {
             </svg>
             <h3 className="mt-2 text-sm font-medium">No audit logs</h3>
             <p className="mt-1 text-sm">No activities match the selected filters.</p>
+          </div>
+        )}
+        {totalPages > 1 && (
+          <div className="px-6 py-4 flex justify-between items-center bg-gray-50 border-t border-gray-200">
+            <div className="text-sm text-gray-500">
+              Showing {startIndex} to {endIndex} of {filteredLogs.length} entries
+            </div>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+              >
+                Previous
+              </button>
+              <span className="px-3 py-2 text-sm text-gray-700">
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage === totalPages}
+                className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>
