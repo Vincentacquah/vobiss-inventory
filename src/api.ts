@@ -1,5 +1,5 @@
 // Updated api.ts with support for item returns (type and reason fields)
-const API_URL = 'http://172.20.1.87:3001/api';
+const API_URL = 'http://localhost:3001/api';
 
 // Helper to get auth header
 const getAuthHeader = () => {
