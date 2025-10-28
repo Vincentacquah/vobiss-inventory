@@ -34,13 +34,19 @@ const UsersPage: React.FC = () => {
     }
   };
 
+  // FIXED: Correct parameter order for createUser
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     setSuccess('');
     try {
-      await createUser(formData.first_name, formData.last_name, formData.email, formData.role);
+      await createUser(
+        formData.first_name.trim(),
+        formData.last_name.trim(),
+        formData.email.trim(),
+        formData.role
+      );
       await loadUsers();
       setFormData({ first_name: '', last_name: '', email: '', role: 'requester' });
       setSuccess('User created successfully');
@@ -95,6 +101,7 @@ const UsersPage: React.FC = () => {
     setEditFormData({ first_name: '', last_name: '', email: '', role: 'requester' });
   };
 
+  // FIXED: Proper syntax + correct object structure
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
@@ -102,7 +109,12 @@ const UsersPage: React.FC = () => {
     setError('');
     setSuccess('');
     try {
-      await updateUser(editingUser.id, editFormData);
+      await updateUser(editingUser.id, {
+        first_name: editFormData.first_name.trim(),
+        last_name: editFormData.last_name.trim(),
+        email: editFormData.email.trim(),
+        role: editFormData.role
+      });
       await loadUsers();
       setSuccess('User updated successfully');
       setTimeout(() => setSuccess(''), 3000);

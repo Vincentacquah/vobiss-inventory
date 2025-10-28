@@ -1,4 +1,3 @@
-// Updated Inventory.tsx
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, Package, Grid, List, AlertTriangle, DollarSign, Image, Info, ChevronDown, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import * as api from '../api';
@@ -17,20 +16,20 @@ const BASE_URL = API_URL.replace('/api', '');
  */
 const Inventory = () => {
   // State management
-  const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [filteredItems, setFilteredItems] = useState([]);
+  const [items, setItems] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [layout, setLayout] = useState<'grid' | 'list'>('list');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState(null);
+  const [itemToDelete, setItemToDelete] = useState<any>(null);
   const [expandedItemId, setExpandedItemId] = useState<number | null>(null);
   const [expandedViewId, setExpandedViewId] = useState<number | null>(null);
   const [showUpdateReasons, setShowUpdateReasons] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
-  const [galleryReceipts, setGalleryReceipts] = useState([]);
+  const [galleryReceipts, setGalleryReceipts] = useState<any[]>([]);
   const [currentReceiptIndex, setCurrentReceiptIndex] = useState(0);
   const [currentReceiptDate, setCurrentReceiptDate] = useState('');
   const { toast } = useToast();
@@ -48,7 +47,7 @@ const Inventory = () => {
   /**
    * Format date to "Tuesday 16/10/2025 14:30"
    */
-  const formatDateTime = (dateString) => {
+  const formatDateTime = (dateString: string | null) => {
     if (!dateString) return 'None';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'None';
@@ -65,7 +64,7 @@ const Inventory = () => {
   /**
    * Calculate total cost: unitPrice * quantity
    */
-  const getTotalCost = (unitPrice, quantity) => {
+  const getTotalCost = (unitPrice: number | null, quantity: number) => {
     if (unitPrice !== null && unitPrice !== undefined && quantity > 0) {
       return `$${(Number(unitPrice) * quantity).toFixed(2)}`;
     }
@@ -73,40 +72,84 @@ const Inventory = () => {
   };
 
   /**
-   * Transform raw item (snake_case) to form item (camelCase)
+   * SAFELY Transform raw item (snake_case) to form item (camelCase)
    */
-  const transformToItem = (rawItem: any): any => ({
-    ...rawItem,
-    categoryId: rawItem.category_id,
-    lowStockThreshold: rawItem.low_stock_threshold,
-    vendorName: rawItem.vendor_name,
-    unitPrice: rawItem.unit_price,
-    receiptImages: rawItem.receipt_images ? JSON.parse(rawItem.receipt_images) : [],
-    updateReasons: rawItem.update_reasons,
-  });
+  const transformToItem = (rawItem: any): any => {
+    let receiptImages: any[] = [];
+
+    if (rawItem.receipt_images) {
+      try {
+        const value = rawItem.receipt_images;
+
+        if (typeof value === 'string' && value.trim()) {
+          receiptImages = JSON.parse(value);
+        } else if (Array.isArray(value)) {
+          receiptImages = value;
+        } else if (typeof value === 'object' && value !== null) {
+          receiptImages = Object.values(value);
+        }
+      } catch (error) {
+        console.warn(`Failed to parse receipt_images for item ID ${rawItem.id}:`, error);
+        receiptImages = [];
+      }
+    }
+
+    return {
+      ...rawItem,
+      categoryId: rawItem.category_id,
+      lowStockThreshold: rawItem.low_stock_threshold,
+      vendorName: rawItem.vendor_name,
+      unitPrice: rawItem.unit_price,
+      receiptImages,
+      updateReasons: rawItem.update_reasons || '',
+    };
+  };
 
   /**
-   * Load items and categories data from API
+   * Load items and categories data from API with robust error handling
    */
   const loadData = async () => {
     try {
       const [itemsData, categoriesData] = await Promise.all([
-        api.getItems(),
-        api.getCategories()
+        api.getItems().catch(err => {
+          console.error('API Error: getItems failed', err);
+          toast({
+            title: "Warning",
+            description: "Could not load items. Using empty list.",
+            variant: "destructive"
+          });
+          return [];
+        }),
+        api.getCategories().catch(err => {
+          console.error('API Error: getCategories failed', err);
+          toast({
+            title: "Warning",
+            description: "Could not load categories. Using empty list.",
+            variant: "destructive"
+          });
+          return [];
+        })
       ]);
+
       console.log('Loaded items:', itemsData);
       console.log('Loaded categories:', categoriesData);
-      // Transform items to include camelCase for form
-      const transformedItems = itemsData.map(transformToItem);
-      setItems(transformedItems || []);
-      setCategories(categoriesData || []);
-    } catch (error) {
-      console.error('Error loading data:', error);
+
+      // Safely transform items
+      const transformedItems = Array.isArray(itemsData)
+        ? itemsData.map(transformToItem)
+        : [];
+
+      setItems(transformedItems);
+      setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+    } catch (error: any) {
+      console.error('Unexpected error in loadData:', error);
       toast({
         title: "Error",
-        description: "Failed to load inventory data",
+        description: "Failed to load inventory data: " + (error.message || "Unknown error"),
         variant: "destructive"
       });
+      setItems([]);
+      setCategories([]);
     }
   };
 
@@ -114,12 +157,13 @@ const Inventory = () => {
    * Filter items based on search term and selected category
    */
   const filterItems = () => {
-    let filtered = items;
+    let filtered = [...items];
     if (searchTerm) {
+      const term = searchTerm.toLowerCase();
       filtered = filtered.filter(item =>
-        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.vendorName?.toLowerCase().includes(searchTerm.toLowerCase())
+        item.name?.toLowerCase().includes(term) ||
+        item.description?.toLowerCase().includes(term) ||
+        item.vendorName?.toLowerCase().includes(term)
       );
     }
     if (selectedCategory) {
@@ -130,17 +174,11 @@ const Inventory = () => {
 
   /**
    * Handle saving an item (add or update)
-   *
-   * @param {Object} itemData - The item data to save
-   * @param {File | null} receiptFile - The receipt file if uploading
-   * @param {number | null} itemId - ID for update
    */
-  const handleSaveItem = async (itemData, receiptFile = null, itemId = null) => {
+  const handleSaveItem = async (itemData: any, receiptFile: File | null = null, itemId: number | null = null) => {
     try {
       const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No access token found. Please log in.');
-      }
+      if (!token) throw new Error('No access token found. Please log in.');
 
       const formData = new FormData();
       formData.append('name', itemData.name);
@@ -149,68 +187,60 @@ const Inventory = () => {
       formData.append('quantity', itemData.quantity.toString());
       formData.append('low_stock_threshold', itemData.lowStockThreshold.toString());
       if (itemData.vendorName) formData.append('vendor_name', itemData.vendorName);
-      if (itemData.unitPrice !== undefined && itemData.unitPrice !== null) formData.append('unit_price', itemData.unitPrice.toString());
+      if (itemData.unitPrice !== undefined && itemData.unitPrice !== null) {
+        formData.append('unit_price', itemData.unitPrice.toString());
+      }
       if (receiptFile) formData.append('receiptImage', receiptFile);
       if (itemId && itemData.updateReason) formData.append('update_reason', itemData.updateReason);
+
       const url = itemId ? `${API_URL}/items/${itemId}` : `${API_URL}/items`;
       const method = itemId ? 'PUT' : 'POST';
+
       const response = await fetch(url, {
         method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
       });
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        const errorText = errorData.error || `Failed to ${itemId ? 'update' : 'add'} item`;
-        throw new Error(errorText);
+        throw new Error(errorData.error || `Failed to ${itemId ? 'update' : 'add'} item`);
       }
-      const result = await response.json();
-      toast({
-        title: "Success",
-        description: `${itemId ? 'Item updated' : 'Item added'} successfully`,
-      });
+
+      await response.json();
+      toast({ title: "Success", description: `${itemId ? 'Item updated' : 'Item added'} successfully` });
       setShowAddForm(false);
       setExpandedItemId(null);
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving item:', error);
       toast({
         title: "Error",
         description: error.message || "Failed to save item",
         variant: "destructive"
       });
-      throw error; // Re-throw to let form handle
+      throw error;
     }
   };
 
   /**
    * Handle deleting an item
-   *
-   * @param {string} itemId - ID of the item to delete
    */
-  const handleDeleteItem = async (itemId) => {
+  const handleDeleteItem = async (itemId: number) => {
     try {
       await api.deleteItem(itemId);
-      toast({
-        title: "Success",
-        description: "Item deleted successfully",
-      });
+      toast({ title: "Success", description: "Item deleted successfully" });
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting item:', error);
       toast({
         title: "Error",
-        description: "Failed to delete item",
+        description: error.message || "Failed to delete item",
         variant: "destructive"
       });
     }
   };
 
-  /**
-   * Confirm delete item
-   */
   const confirmDeleteItem = async () => {
     if (itemToDelete) {
       await handleDeleteItem(itemToDelete.id);
@@ -221,23 +251,16 @@ const Inventory = () => {
 
   /**
    * Get category name by ID
-   *
-   * @param {string} categoryId - The category ID
-   * @returns {string} The category name
    */
-  const getCategoryName = (categoryId) => {
+  const getCategoryName = (categoryId: any) => {
     const category = categories.find(cat => String(cat.id) === String(categoryId));
     return category ? category.name : 'Unknown';
   };
 
   /**
    * Get CSS classes for stock status display
-   *
-   * @param {number} quantity - Current stock quantity
-   * @param {number} lowStockThreshold - Low stock threshold value
-   * @returns {string} CSS class names
    */
-  const getStockStatusColor = (quantity, lowStockThreshold = 10) => {
+  const getStockStatusColor = (quantity: number, lowStockThreshold = 10) => {
     if (quantity <= 0) return 'text-red-600 bg-red-50';
     if (quantity <= lowStockThreshold) return 'text-yellow-600 bg-yellow-50';
     return 'text-green-600 bg-green-50';
@@ -254,9 +277,9 @@ const Inventory = () => {
   };
 
   /**
-   * Item Details Content (for inline expandable view)
+   * Item Details Content
    */
-  const ItemDetails = ({ item }) => (
+  const ItemDetails = ({ item }: { item: any }) => (
     <div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Basic Information */}
@@ -285,7 +308,6 @@ const Inventory = () => {
               </div>
             </dl>
           </div>
-          {/* Timestamps */}
           <div className="bg-gray-50 p-4 rounded-lg">
             <h3 className="font-semibold text-gray-900 mb-3">Timestamps</h3>
             <dl className="space-y-2 text-sm">
@@ -332,7 +354,6 @@ const Inventory = () => {
               </div>
             </dl>
           </div>
-          {/* Recent Receipts */}
           {item.receiptImages && item.receiptImages.length > 0 && (
             <div className="bg-gray-50 p-4 rounded-lg">
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center">
@@ -340,7 +361,7 @@ const Inventory = () => {
                 Recent Receipts ({item.receiptImages.length})
               </h3>
               <div className="grid grid-cols-2 gap-2">
-                {item.receiptImages.map((receipt, index) => (
+                {item.receiptImages.map((receipt: any, index: number) => (
                   <button
                     key={index}
                     onClick={() => handleViewReceipt(index, item.receiptImages, receipt.uploaded_at)}
@@ -350,9 +371,7 @@ const Inventory = () => {
                       src={`${BASE_URL}${receipt.path}`}
                       alt={`Receipt ${index + 1}`}
                       className="w-full h-24 object-cover rounded-lg border cursor-pointer hover:opacity-80"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     />
                     <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-lg transition-all"></div>
                     <p className="text-xs text-gray-500 text-center mt-1">
@@ -365,7 +384,6 @@ const Inventory = () => {
           )}
         </div>
       </div>
-      {/* Recent Update History - at bottom */}
       {item.updateReasons && item.updateReasons.trim() && (
         <div className="mt-6">
           <button
@@ -381,7 +399,7 @@ const Inventory = () => {
           {showUpdateReasons && (
             <div className="bg-blue-50 p-4 rounded-lg">
               <ul className="space-y-2 text-sm">
-                {item.updateReasons.split(' | ').filter(reason => reason.trim()).reverse().map((reason, index) => (
+                {item.updateReasons.split(' | ').filter(Boolean).reverse().map((reason: string, index: number) => (
                   <li key={index} className="bg-white p-3 rounded border-l-4 border-blue-500 pl-4">
                     {reason.trim()}
                   </li>
@@ -403,18 +421,21 @@ const Inventory = () => {
     const fullUrl = `${BASE_URL}${currentReceipt.path}`;
     const prevReceipt = () => setCurrentReceiptIndex((i) => (i - 1 + galleryReceipts.length) % galleryReceipts.length);
     const nextReceipt = () => setCurrentReceiptIndex((i) => (i + 1) % galleryReceipts.length);
+
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-xl p-4 max-w-4xl w-full max-h-[90vh] overflow-hidden">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold">Receipt {currentReceiptIndex + 1} of {galleryReceipts.length} - {currentReceiptDate}</h3>
-            <button 
-              onClick={() => { 
-                setShowReceiptModal(false); 
-                setGalleryReceipts([]); 
-                setCurrentReceiptIndex(0); 
+            <h3 className="text-lg font-semibold">
+              Receipt {currentReceiptIndex + 1} of {galleryReceipts.length} - {currentReceiptDate}
+            </h3>
+            <button
+              onClick={() => {
+                setShowReceiptModal(false);
+                setGalleryReceipts([]);
+                setCurrentReceiptIndex(0);
                 setCurrentReceiptDate('');
-              }} 
+              }}
               className="text-gray-500 hover:text-gray-700"
             >
               <X className="h-6 w-6" />
@@ -432,9 +453,7 @@ const Inventory = () => {
               src={fullUrl}
               alt="Receipt"
               className="max-w-full max-h-full object-contain rounded-lg"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
             <button
               onClick={nextReceipt}
@@ -446,7 +465,7 @@ const Inventory = () => {
           </div>
           {galleryReceipts.length > 1 && (
             <div className="flex gap-2 mt-4 overflow-x-auto p-2">
-              {galleryReceipts.map((receipt, index) => (
+              {galleryReceipts.map((receipt: any, index: number) => (
                 <button
                   key={index}
                   onClick={() => {
@@ -461,9 +480,7 @@ const Inventory = () => {
                     src={`${BASE_URL}${receipt.path}`}
                     alt={`Thumbnail ${index + 1}`}
                     className="w-full h-full object-cover rounded"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                    }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                   />
                 </button>
               ))}
@@ -511,7 +528,7 @@ const Inventory = () => {
         </div>
       </div>
 
-      {/* Add Item Form - Dropdown-like pushing content down */}
+      {/* Add Item Form */}
       {showAddForm && (
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6 animate-slideDown">
           <div className="flex justify-between items-center mb-4">
@@ -572,11 +589,8 @@ const Inventory = () => {
                 <div className="flex space-x-2">
                   <button
                     onClick={() => {
-                      const newId = expandedViewId === item.id ? null : item.id;
-                      setExpandedViewId(newId);
-                      if (newId !== null) {
-                        setShowUpdateReasons(false);
-                      }
+                      setExpandedViewId(expandedViewId === item.id ? null : item.id);
+                      if (expandedViewId !== item.id) setShowUpdateReasons(false);
                     }}
                     className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
                     aria-label="View details"
@@ -584,9 +598,7 @@ const Inventory = () => {
                     <Info className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => {
-                      setExpandedItemId(expandedItemId === item.id ? null : item.id);
-                    }}
+                    onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
                     className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
                     aria-label="Edit item"
                   >
@@ -605,9 +617,7 @@ const Inventory = () => {
                 </div>
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">{item.name}</h3>
-              {item.description && (
-                <p className="text-sm text-gray-600 mb-3">{item.description}</p>
-              )}
+              {item.description && <p className="text-sm text-gray-600 mb-3">{item.description}</p>}
               <div className="space-y-2 mb-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-700">Category</span>
@@ -621,19 +631,19 @@ const Inventory = () => {
                     <span className="text-sm text-gray-600">{item.vendorName}</span>
                   </div>
                 )}
-                {item.unitPrice !== null && item.unitPrice !== undefined && (
+                {item.unitPrice != null && (
                   <div className="flex items-center justify-between">
                     <DollarSign className="h-3 w-3 text-gray-500" />
                     <span className="text-sm font-medium text-gray-900">${Number(item.unitPrice).toFixed(2)}</span>
                   </div>
                 )}
-                {item.unitPrice !== null && item.unitPrice !== undefined && item.quantity > 0 && (
+                {item.unitPrice != null && item.quantity > 0 && (
                   <div className="flex items-center justify-between">
                     <DollarSign className="h-3 w-3 text-gray-500" />
                     <span className="text-sm font-medium text-gray-900">Total: {getTotalCost(item.unitPrice, item.quantity)}</span>
                   </div>
                 )}
-                {item.receiptImages && item.receiptImages.length > 0 && (
+                {item.receiptImages?.length > 0 && (
                   <div className="flex items-center justify-between">
                     <Image className="h-3 w-3 text-gray-500" />
                     <span className="text-sm text-gray-600">{item.receiptImages.length} receipts</span>
@@ -646,13 +656,11 @@ const Inventory = () => {
                   {item.quantity} units
                 </span>
               </div>
-              {/* Expanded view details for grid */}
               {expandedViewId === item.id && (
                 <div className="mt-6 pt-6 border-t border-gray-200 bg-gray-50 rounded-b-xl animate-slideDown">
                   <ItemDetails item={item} />
                 </div>
               )}
-              {/* Expanded edit form for grid - pushes content down in card */}
               {expandedItemId === item.id && (
                 <div className="mt-4 pt-4 border-t border-gray-200 animate-slideDown">
                   <ItemForm
@@ -674,37 +682,19 @@ const Inventory = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Name
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Description
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Category
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Vendor
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Unit Price
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total Cost
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Receipt
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Stock
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredItems.map((item) => (
+                {filteredItems.map(item => (
                   <React.Fragment key={item.id}>
                     <tr className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -713,29 +703,21 @@ const Inventory = () => {
                           <div className="text-sm font-medium text-gray-900">{item.name}</div>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-900">{item.description || 'No description'}</div>
-                      </td>
+                      <td className="px-6 py-4"><div className="text-sm text-gray-900">{item.description || 'No description'}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">
-                          {getCategoryName(item.categoryId)}
-                        </div>
+                        <div className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">{getCategoryName(item.categoryId)}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{item.vendorName || 'N/A'}</div>
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900">{item.vendorName || 'N/A'}</div></td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {item.unitPrice !== null && item.unitPrice !== undefined ? `$${Number(item.unitPrice).toFixed(2)}` : 'N/A'}
+                          {item.unitPrice != null ? `$${Number(item.unitPrice).toFixed(2)}` : 'N/A'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {getTotalCost(item.unitPrice, item.quantity)}
-                        </div>
+                        <div className="text-sm font-medium text-gray-900">{getTotalCost(item.unitPrice, item.quantity)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {item.receiptImages && item.receiptImages.length > 0 ? (
+                        {item.receiptImages?.length > 0 ? (
                           <span className="text-sm text-gray-500">{item.receiptImages.length} receipts</span>
                         ) : (
                           <span className="text-sm text-gray-500">None</span>
@@ -750,50 +732,35 @@ const Inventory = () => {
                         <div className="flex space-x-2">
                           <button
                             onClick={() => {
-                              const newId = expandedViewId === item.id ? null : item.id;
-                              setExpandedViewId(newId);
-                              if (newId !== null) {
-                                setShowUpdateReasons(false);
-                              }
+                              setExpandedViewId(expandedViewId === item.id ? null : item.id);
+                              if (expandedViewId !== item.id) setShowUpdateReasons(false);
                             }}
                             className="text-blue-600 hover:text-blue-900"
-                            aria-label="View details"
                           >
                             <Info className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => {
-                              setExpandedItemId(expandedItemId === item.id ? null : item.id);
-                            }}
+                            onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
                             className="text-green-600 hover:text-green-900"
-                            aria-label="Edit item"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => {
-                              setItemToDelete(item);
-                              setConfirmDelete(true);
-                            }}
+                            onClick={() => { setItemToDelete(item); setConfirmDelete(true); }}
                             className="text-red-600 hover:text-red-900"
-                            aria-label="Delete item"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
                     </tr>
-                    {/* Expanded view details for list */}
                     {expandedViewId === item.id && (
                       <tr>
                         <td colSpan={9} className="bg-gray-50 p-0">
-                          <div className="p-6">
-                            <ItemDetails item={item} />
-                          </div>
+                          <div className="p-6"><ItemDetails item={item} /></div>
                         </td>
                       </tr>
                     )}
-                    {/* Expanded edit form for list */}
                     {expandedItemId === item.id && (
                       <tr>
                         <td colSpan={9} className="bg-gray-50 p-0">
@@ -816,10 +783,8 @@ const Inventory = () => {
         </div>
       )}
 
-      {/* Receipt Modal */}
       <ReceiptModal />
 
-      {/* Confirm Delete Modal */}
       {confirmDelete && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-md w-full">
@@ -830,19 +795,10 @@ const Inventory = () => {
               </p>
             </div>
             <div className="flex justify-end space-x-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setConfirmDelete(false);
-                  setItemToDelete(null);
-                }}
-              >
+              <Button variant="outline" onClick={() => { setConfirmDelete(false); setItemToDelete(null); }}>
                 Cancel
               </Button>
-              <Button
-                variant="destructive"
-                onClick={confirmDeleteItem}
-              >
+              <Button variant="destructive" onClick={confirmDeleteItem}>
                 Delete Item
               </Button>
             </div>
