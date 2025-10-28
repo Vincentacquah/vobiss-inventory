@@ -1106,7 +1106,7 @@ const AIAssistant: React.FC = () => {
             </Button>
           </form>
           {messages.length > 0 && (
-            <p className="text-xs text-gray-500 mt-2 text-center">Tip: "quantity > 10" for filters.</p>
+            <p className="text-xs text-gray-500 mt-2 text-center">Tip: "quantity {'{'>'}'} 10" for filters.</p>
           )}
         </div>
       </footer>
