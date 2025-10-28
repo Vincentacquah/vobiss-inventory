@@ -12,7 +12,7 @@ const BASE_URL = API_URL.replace('/api', '');
 /**
  * Inventory Component
  * Manages and displays inventory items with filtering, adding, editing, and deletion capabilities
- *
+ * 
  * @returns {JSX.Element} The rendered inventory page
  */
 const Inventory = () => {
@@ -60,6 +60,16 @@ const Inventory = () => {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  /**
+   * Calculate total cost: unitPrice * quantity
+   */
+  const getTotalCost = (unitPrice, quantity) => {
+    if (unitPrice !== null && unitPrice !== undefined && quantity > 0) {
+      return `$${(Number(unitPrice) * quantity).toFixed(2)}`;
+    }
+    return 'N/A';
   };
 
   /**
@@ -305,6 +315,10 @@ const Inventory = () => {
                     ? `$${Number(item.unitPrice).toFixed(2)}`
                     : 'N/A'}
                 </dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Total Cost</dt>
+                <dd className="font-medium text-gray-900">{getTotalCost(item.unitPrice, item.quantity)}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Quantity</dt>
@@ -613,6 +627,12 @@ const Inventory = () => {
                     <span className="text-sm font-medium text-gray-900">${Number(item.unitPrice).toFixed(2)}</span>
                   </div>
                 )}
+                {item.unitPrice !== null && item.unitPrice !== undefined && item.quantity > 0 && (
+                  <div className="flex items-center justify-between">
+                    <DollarSign className="h-3 w-3 text-gray-500" />
+                    <span className="text-sm font-medium text-gray-900">Total: {getTotalCost(item.unitPrice, item.quantity)}</span>
+                  </div>
+                )}
                 {item.receiptImages && item.receiptImages.length > 0 && (
                   <div className="flex items-center justify-between">
                     <Image className="h-3 w-3 text-gray-500" />
@@ -670,6 +690,9 @@ const Inventory = () => {
                     Unit Price
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total Cost
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Receipt
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -704,6 +727,11 @@ const Inventory = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
                           {item.unitPrice !== null && item.unitPrice !== undefined ? `$${Number(item.unitPrice).toFixed(2)}` : 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {getTotalCost(item.unitPrice, item.quantity)}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -758,7 +786,7 @@ const Inventory = () => {
                     {/* Expanded view details for list */}
                     {expandedViewId === item.id && (
                       <tr>
-                        <td colSpan={8} className="bg-gray-50 p-0">
+                        <td colSpan={9} className="bg-gray-50 p-0">
                           <div className="p-6">
                             <ItemDetails item={item} />
                           </div>
@@ -768,7 +796,7 @@ const Inventory = () => {
                     {/* Expanded edit form for list */}
                     {expandedItemId === item.id && (
                       <tr>
-                        <td colSpan={8} className="bg-gray-50 p-0">
+                        <td colSpan={9} className="bg-gray-50 p-0">
                           <ItemForm
                             initialData={item}
                             categories={categories}

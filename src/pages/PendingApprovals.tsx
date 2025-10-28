@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
-import { getRequests, approveRequest } from '../api';
+import { getRequests, approveRequest, rejectRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import Modal from '../components/Modal';
 
 interface Request {
@@ -23,14 +24,17 @@ interface Request {
   created_at: string;
   updated_at: string;
   item_count: number;
+  reject_reason?: string | null;
 }
 
 const PendingApprovals: React.FC = () => {
+  const { user } = useAuth();
   const [allRequests, setAllRequests] = useState<Request[]>([]);
   const [filteredRequests, setFilteredRequests] = useState<Request[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'completed' | 'rejected'>('pending');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -89,6 +93,35 @@ const PendingApprovals: React.FC = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to approve request",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleReject = async (reason: string) => {
+    if (!selectedRequestId || !reason.trim()) {
+      toast({
+        title: "Error",
+        description: "Rejection reason is required",
+        variant: "destructive"
+      });
+      return;
+    }
+    try {
+      const rejectorName = user?.full_name || user?.username || 'Unknown User';
+      await rejectRequest(selectedRequestId, { reason, rejectorName });
+      setIsRejectModalOpen(false);
+      toast({
+        title: "Success",
+        description: "Request rejected successfully",
+        variant: "default"
+      });
+      loadRequests();
+    } catch (error: any) {
+      console.error('Error rejecting request:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject request",
         variant: "destructive"
       });
     }
@@ -201,6 +234,11 @@ const PendingApprovals: React.FC = () => {
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
                           {statusIcon(request.status)}
                           {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                          {request.status === 'rejected' && request.reject_reason && (
+                            <div className="ml-2 text-xs bg-red-200 px-2 py-1 rounded-full max-w-32 truncate" title={request.reject_reason}>
+                              {request.reject_reason.length > 20 ? `${request.reject_reason.substring(0, 20)}...` : request.reject_reason}
+                            </div>
+                          )}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -212,16 +250,29 @@ const PendingApprovals: React.FC = () => {
                             View
                           </Link>
                           {request.status === 'pending' && (
-                            <Button
-                              onClick={() => {
-                                setSelectedRequestId(request.id);
-                                setIsModalOpen(true);
-                              }}
-                              size="sm"
-                              className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
-                            >
-                              Approve
-                            </Button>
+                            <>
+                              <Button
+                                onClick={() => {
+                                  setSelectedRequestId(request.id);
+                                  setIsModalOpen(true);
+                                }}
+                                size="sm"
+                                className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
+                              >
+                                Approve
+                              </Button>
+                              <Button
+                                onClick={() => {
+                                  setSelectedRequestId(request.id);
+                                  setIsRejectModalOpen(true);
+                                }}
+                                variant="destructive"
+                                size="sm"
+                                className="rounded-lg"
+                              >
+                                Reject
+                              </Button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -241,6 +292,10 @@ const PendingApprovals: React.FC = () => {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Approve Request">
         <ApprovalForm onSave={handleApprove} onCancel={() => setIsModalOpen(false)} />
+      </Modal>
+
+      <Modal isOpen={isRejectModalOpen} onClose={() => setIsRejectModalOpen(false)} title="Reject Request">
+        <RejectForm onSave={handleReject} onCancel={() => setIsRejectModalOpen(false)} />
       </Modal>
     </div>
   );
@@ -286,6 +341,41 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
       <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
         <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg">Cancel</Button>
         <Button onClick={handleSubmit} className="bg-green-600 text-white hover:bg-green-700 rounded-lg">Approve</Button>
+      </div>
+    </div>
+  );
+};
+
+interface RejectFormProps {
+  onSave: (reason: string) => void;
+  onCancel: () => void;
+}
+
+const RejectForm: React.FC<RejectFormProps> = ({ onSave, onCancel }) => {
+  const [reason, setReason] = useState('');
+
+  const handleSubmit = () => {
+    if (!reason.trim()) {
+      alert('Please provide a rejection reason');
+      return;
+    }
+    onSave(reason);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-gray-700">Rejection Reason *</label>
+        <Input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Enter the reason for rejecting this request"
+          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+        />
+      </div>
+      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+        <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg">Cancel</Button>
+        <Button onClick={handleSubmit} variant="destructive" className="rounded-lg">Reject</Button>
       </div>
     </div>
   );
