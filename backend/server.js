@@ -62,9 +62,12 @@ const upload = multer({
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({ origin: '*' }));  // Allow all origins for office network; tighten in prod (e.g., 'http://172.20.1.87:3000')
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
+
+// Serve frontend static files from ../dist (for prod/office hosting)
+app.use(express.static(path.join(__dirname, '../dist')));
 
 // JWT Auth Middleware
 const authenticateToken = (req, res, next) => {
@@ -136,7 +139,10 @@ async function seedDefaultUser() {
   }
 }
 
-await seedDefaultUser();
+// Wrap seed in async IIFE to fix top-level await
+(async () => {
+  await seedDefaultUser();
+})();
 
 // Auth Routes
 app.post('/api/login', async (req, res) => {
@@ -645,10 +651,10 @@ app.get('/api/requests/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// NEW: Serve static files from Vite's dist folder (for production) - adjusted path for /backend location
+// UPDATED: Serve static files from Vite's dist folder (for production/office hosting)
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// UPDATED: Catch-all handler for client-side routes (AFTER all API routes) - removed '*' path to avoid path-to-regexp error
+// UPDATED: Catch-all handler for client-side routes (AFTER all API routes)
 app.use((req, res) => {
   // Skip API and uploads paths to avoid interference
   if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
@@ -658,11 +664,12 @@ app.use((req, res) => {
   if (req.method !== 'GET') {
     return res.status(405).send('Method Not Allowed');
   }
-  // Serve index.html for SPA routing - adjusted path for /backend location
+  // Serve index.html for SPA routing
   res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
-// Start the server
-app.listen(port, () => {
+// UPDATED: Start the server - Bind to 0.0.0.0 for office IP access (172.20.1.87)
+app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
+  console.log(`Access via: http://localhost:${port} (local) or http://172.20.1.87:${port} (office network)`);
 });
