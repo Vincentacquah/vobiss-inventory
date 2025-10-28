@@ -6,8 +6,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import ItemForm from '../components/ItemForm';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const BASE_URL = API_URL.replace('/api', '');
+const API_URL = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api';
+const BASE_URL = import.meta.env.DEV ? 'http://localhost:3001' : '';
 
 /**
  * Inventory Component

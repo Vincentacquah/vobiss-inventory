@@ -1,5 +1,6 @@
 // Updated api.ts with support for item returns (type and reason fields)
-const API_URL = 'http://localhost:3001/api';
+// Use relative path for production (same origin as frontend)
+const API_URL = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api';
 
 // Helper to get auth header
 const getAuthHeader = () => {
@@ -228,7 +229,7 @@ export const createUser = async (firstName: string, lastName: string, email: str
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ first_name: firstName, last_name: lastName, email, role }),
+      body: JSON.stringify({ first_name: firstName, last_name: LastName, email, role }),
     });
     return await response.json();
   } catch (error) {

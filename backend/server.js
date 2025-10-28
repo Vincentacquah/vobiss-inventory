@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import crypto from 'crypto';  // For auto-generating JWT_SECRET
 import {
   getItems, addItem, updateItem, deleteItem,
   getCategories, addCategory, updateCategory, deleteCategory,
@@ -30,7 +31,31 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3001;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this';
+
+// Generate or load JWT_SECRET (auto-generate and persist if missing)
+let JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.warn('No JWT_SECRET in .env; generating a secure one...');
+  JWT_SECRET = crypto.randomBytes(32).toString('base64');
+  
+  // Persist to .env file (appends if missing, updates if present)
+  const envPath = path.join(__dirname, '.env');
+  let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+  
+  // Update or add the line
+  const secretLine = `JWT_SECRET=${JWT_SECRET}`;
+  if (envContent.includes('JWT_SECRET=')) {
+    envContent = envContent.replace(/JWT_SECRET=.*$/m, secretLine);
+  } else {
+    envContent += `\n${secretLine}`;
+  }
+  
+  fs.writeFileSync(envPath, envContent.trim() + '\n');
+  console.log(`Generated and saved JWT_SECRET to .env: ${JWT_SECRET}`);
+  console.log('Restart the server to use the new secret (existing tokens will be invalidated).');
+} else {
+  console.log('Using existing JWT_SECRET from .env');
+}
 
 // Ensure uploads directory exists
 const uploadsDir = './uploads';
@@ -62,9 +87,17 @@ const upload = multer({
 });
 
 // Middleware
-app.use(cors());
+app.use(cors({ origin: true }));  // Allows all origins; tighten to 'http://172.20.1.87:3001' if needed
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
+
+// Prod logging (optional)
+if (process.env.NODE_ENV !== 'development') {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
+  });
+}
 
 // JWT Auth Middleware
 const authenticateToken = (req, res, next) => {
@@ -662,7 +695,7 @@ app.use((req, res) => {
   res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// Start the server - Bind to 0.0.0.0 for network access
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${port}`);
 });
