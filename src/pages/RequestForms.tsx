@@ -1,12 +1,14 @@
-// Updated RequestForms.tsx with approver selection
+// Updated RequestForms.tsx with multi-approver selection
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Clock, CheckCircle, XCircle, User } from 'lucide-react';
+import { Plus, Search, Clock, CheckCircle, XCircle, User, Users } from 'lucide-react';
 import { getRequests, getItems, createRequest, getApprovers } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox"; // Assuming shadcn/ui has Checkbox; install if needed
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge"; // For displaying selected chips
 import { Link } from 'react-router-dom';
 
 interface Request {
@@ -128,7 +130,7 @@ const RequestForms: React.FC = () => {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
-    selectedApproverId: number;
+    selectedApproverIds: number[]; // Changed to array for multi-select
   }) => {
     try {
       await createRequest({
@@ -142,11 +144,11 @@ const RequestForms: React.FC = () => {
         receivedBy: formData.receivedBy,
         deployment: formData.deployment,
         items: formData.items,
-      }, formData.selectedApproverId);
+      }, formData.selectedApproverIds, 'material_request'); // Pass full array and type
       setIsFormOpen(false);
       toast({
         title: "Success",
-        description: "Material request created",
+        description: `Material request created and assigned to ${formData.selectedApproverIds.length} approver(s)`,
         variant: "default"
       });
       loadRequests();
@@ -338,7 +340,7 @@ interface RequestFormProps {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
-    selectedApproverId: number;
+    selectedApproverIds: number[]; // Changed to array
   }) => void;
   onCancel: () => void;
   items: Item[];
@@ -355,10 +357,11 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     location: '',
     receivedBy: '',
     deployment: 'Deployment' as 'Deployment' | 'Maintenance',
-    selectedApproverId: 0,
   });
+  const [selectedApproverIds, setSelectedApproverIds] = useState<number[]>([]); // New state for multi-select
   const [selectedItems, setSelectedItems] = useState<{ name: string; requested: string }[]>([{ name: '', requested: '' }]);
   const [submitting, setSubmitting] = useState(false);
+  const [showAllApprovers, setShowAllApprovers] = useState(false); // For "select all" toggle
 
   // Refs for form inputs
   const createdByRef = useRef<HTMLInputElement>(null);
@@ -368,7 +371,6 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   const ispNameRef = useRef<HTMLInputElement>(null);
   const locationRef = useRef<HTMLInputElement>(null);
   const receivedByRef = useRef<HTMLInputElement>(null);
-  const approverRef = useRef<HTMLSelectElement>(null);
   const deploymentRefs = useRef<(HTMLInputElement | null)[]>([]);
   const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
   const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
@@ -381,6 +383,24 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
         nextRef.current.focus();
       }
     }
+  };
+
+  // Handle approver selection
+  const handleApproverToggle = (approverId: number, checked: boolean) => {
+    if (checked) {
+      setSelectedApproverIds(prev => [...prev, approverId]);
+    } else {
+      setSelectedApproverIds(prev => prev.filter(id => id !== approverId));
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (showAllApprovers) {
+      setSelectedApproverIds([]); // Deselect all
+    } else {
+      setSelectedApproverIds(approvers.map(a => a.id)); // Select all
+    }
+    setShowAllApprovers(!showAllApprovers);
   };
 
   const handleAddItem = () => {
@@ -403,8 +423,14 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     e.preventDefault();
     setSubmitting(true);
 
-    if (!formData.createdBy || !formData.teamLeaderName || !formData.projectName || !formData.location || !formData.receivedBy || !formData.selectedApproverId) {
+    if (!formData.createdBy || !formData.teamLeaderName || !formData.projectName || !formData.location || !formData.receivedBy) {
       alert('Please fill all required fields');
+      setSubmitting(false);
+      return;
+    }
+
+    if (selectedApproverIds.length === 0) {
+      alert('Please select at least one approver');
       setSubmitting(false);
       return;
     }
@@ -418,7 +444,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       return;
     }
 
-    onSave({ ...formData, items: validItems });
+    onSave({ ...formData, items: validItems, selectedApproverIds });
     // Reset form after successful save
     setFormData({
       createdBy: '',
@@ -429,8 +455,9 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
       location: '',
       receivedBy: '',
       deployment: 'Deployment' as 'Deployment' | 'Maintenance',
-      selectedApproverId: 0,
     });
+    setSelectedApproverIds([]);
+    setShowAllApprovers(false);
     setSelectedItems([{ name: '', requested: '' }]);
     setSubmitting(false);
   };
@@ -516,37 +543,61 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
             ref={receivedByRef}
             value={formData.receivedBy}
             onChange={(e) => setFormData({ ...formData, receivedBy: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, approverRef)}
+            onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
             placeholder="Received by name"
             className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
             disabled={submitting}
           />
         </div>
+        {/* Updated Multi-Approver Selection */}
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700 flex items-center">
-            <User className="h-4 w-4 mr-2 text-gray-500" />
-            Assigned Approver *
+            <Users className="h-4 w-4 mr-2 text-gray-500" />
+            Assigned Approver(s) * (Select multiple or all)
           </label>
-          <Select 
-            value={formData.selectedApproverId.toString()} 
-            onValueChange={(value) => setFormData({ ...formData, selectedApproverId: parseInt(value) })}
-            disabled={submitting}
-          >
-            <SelectTrigger 
-              ref={approverRef}
-              className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-              onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
-            >
-              <SelectValue placeholder="Select an approver" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl shadow-lg border-gray-200 max-h-60">
+          <div className="border border-gray-300 rounded-xl p-4 shadow-sm bg-gray-50 max-h-48 overflow-y-auto">
+            <div className="flex items-center space-x-2 mb-3">
+              <Checkbox
+                id="select-all"
+                checked={showAllApprovers}
+                onCheckedChange={handleSelectAll}
+                disabled={submitting}
+              />
+              <label htmlFor="select-all" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Select/Deselect All ({approvers.length})
+              </label>
+            </div>
+            <div className="space-y-2">
               {approvers.map((approver) => (
-                <SelectItem key={approver.id} value={approver.id.toString()} className="px-4 py-2 hover:bg-blue-50">
-                  {approver.fullName}
-                </SelectItem>
+                <div key={approver.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`approver-${approver.id}`}
+                    checked={selectedApproverIds.includes(approver.id)}
+                    onCheckedChange={(checked) => handleApproverToggle(approver.id, !!checked)}
+                    disabled={submitting}
+                  />
+                  <label htmlFor={`approver-${approver.id}`} className="text-sm text-gray-700 cursor-pointer flex-1">
+                    {approver.fullName}
+                  </label>
+                </div>
               ))}
-            </SelectContent>
-          </Select>
+            </div>
+          </div>
+          {selectedApproverIds.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {selectedApproverIds.map(id => {
+                const approver = approvers.find(a => a.id === id);
+                return approver ? (
+                  <Badge key={id} variant="secondary" className="text-xs">
+                    {approver.fullName}
+                  </Badge>
+                ) : null;
+              })}
+            </div>
+          )}
+          {selectedApproverIds.length === 0 && (
+            <p className="text-sm text-gray-500 mt-1">No approvers selected</p>
+          )}
         </div>
       </div>
       <div className="space-y-3">

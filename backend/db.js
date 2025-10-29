@@ -1,4 +1,4 @@
-// Updated db.js with developer code for backup and restore
+// Updated db.js with multi-approver support via junction table
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -88,7 +88,7 @@ async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
   }
 }
 
-// Database backup function (updated to require developer code)
+// Database backup function (updated to require developer code, include new junction table)
 export async function backupDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -96,7 +96,8 @@ export async function backupDatabase(developerCode) {
   try {
     const tables = [
       'users', 'supervisors', 'settings', 'audit_logs', 'categories', 'vendors',
-      'items', 'items_out', 'requests', 'request_items', 'approvals', 'rejections'
+      'items', 'items_out', 'requests', 'request_items', 'approvals', 'rejections',
+      'request_approvers' // New junction table
     ];
     const backup = {};
     for (const table of tables) {
@@ -111,7 +112,7 @@ export async function backupDatabase(developerCode) {
   }
 }
 
-// Database restore function (updated to require developer code, fixed to preserve original IDs and reset sequences)
+// Database restore function (updated to require developer code, fixed to preserve original IDs and reset sequences, handle new table)
 export async function restoreDatabase(backupData, developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -122,8 +123,8 @@ export async function restoreDatabase(backupData, developerCode) {
 
     // Truncate tables in reverse dependency order (CASCADE handles FK)
     const truncateOrder = [
-      'audit_logs', 'rejections', 'approvals', 'request_items', 'requests',
-      'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
+      'audit_logs', 'rejections', 'approvals', 'request_items', 'request_approvers', // Updated order
+      'requests', 'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
     ];
     for (const table of truncateOrder) {
       await client.query(`TRUNCATE TABLE ${table} CASCADE`);
@@ -132,7 +133,8 @@ export async function restoreDatabase(backupData, developerCode) {
     // Insert tables in dependency order, preserving original IDs
     const insertOrder = [
       'users', 'supervisors', 'settings', 'categories', 'vendors', 'items',
-      'items_out', 'requests', 'request_items', 'approvals', 'rejections', 'audit_logs'
+      'items_out', 'requests', 'request_approvers', // New: after requests
+      'request_items', 'approvals', 'rejections', 'audit_logs'
     ];
     for (const table of insertOrder) {
       if (!backupData[table] || backupData[table].length === 0) {
@@ -165,7 +167,7 @@ export async function restoreDatabase(backupData, developerCode) {
   }
 }
 
-// Database wipe function (requires developer code)
+// Database wipe function (requires developer code, updated for new table)
 export async function wipeDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -176,8 +178,8 @@ export async function wipeDatabase(developerCode) {
 
     // Truncate all tables (CASCADE handles FK)
     const truncateOrder = [
-      'audit_logs', 'rejections', 'approvals', 'request_items', 'requests',
-      'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
+      'audit_logs', 'rejections', 'approvals', 'request_items', 'request_approvers',
+      'requests', 'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
     ];
     for (const table of truncateOrder) {
       await client.query(`TRUNCATE TABLE ${table} CASCADE`);
@@ -195,7 +197,7 @@ export async function wipeDatabase(developerCode) {
   }
 }
 
-// Initialize database tables with enhanced error handling
+// Initialize database tables with enhanced error handling (add request_approvers junction table)
 export async function initDB() {
   try {
     // Users table
@@ -327,7 +329,7 @@ export async function initDB() {
       );
     `, 'items_out');
 
-    // Requests table (updated with type and reason)
+    // Requests table (removed selected_approver_id, as multi now handled by junction)
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS requests (
         id SERIAL PRIMARY KEY,
@@ -340,7 +342,6 @@ export async function initDB() {
         deployment_type VARCHAR(100),
         release_by VARCHAR(255),
         received_by VARCHAR(255),
-        selected_approver_id INTEGER REFERENCES users(id),
         type VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return')),
         reason TEXT,
         status VARCHAR(50) DEFAULT 'pending',
@@ -349,19 +350,16 @@ export async function initDB() {
       );
     `, 'requests');
 
-    // Migrate selected_approver_id, type, and reason if needed
-    try {
-      await addColumnIfNotExists('requests', 'selected_approver_id', 'INTEGER REFERENCES users(id)');
-      await addColumnIfNotExists('requests', 'type', "VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return'))");
-      await addColumnIfNotExists('requests', 'reason', 'TEXT');
-      console.log('Requests migrations (approver_id, type, reason) completed.');
-    } catch (alterError) {
-      if (!alterError.message.includes('already exists')) {
-        console.warn('Warning during requests schema migration:', alterError.message);
-      } else {
-        console.log('Requests migrations skipped (already applied).');
-      }
-    }
+    // New junction table for multi-approvers
+    await createTableIfNotExists(`
+      CREATE TABLE IF NOT EXISTS request_approvers (
+        id SERIAL PRIMARY KEY,
+        request_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+        approver_id INTEGER REFERENCES users(id),
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(request_id, approver_id)
+      );
+    `, 'request_approvers');
 
     // Request items table
     await createTableIfNotExists(`
@@ -1206,8 +1204,11 @@ export async function getDashboardStats() {
   }
 }
 
-// Updated createRequest function in db.js to handle defaults for returns
-export async function createRequest(requestData, selectedApproverId, requestType = 'material_request', userId, ip) {
+// Updated createRequest to handle array of selectedApproverIds via junction table
+export async function createRequest(requestData, selectedApproverIds, requestType = 'material_request', userId, ip) {
+  if (!Array.isArray(selectedApproverIds) || selectedApproverIds.length === 0) {
+    throw new Error('At least one approver ID is required');
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1222,10 +1223,19 @@ export async function createRequest(requestData, selectedApproverId, requestType
     const receivedByValue = receivedBy || null;
     
     const requestResult = await client.query(
-      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, selected_approver_id, type, reason, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP) RETURNING *',
-      [createdBy, teamLeaderNameValue, teamLeaderPhoneValue, projectName, ispNameValue, location, deploymentValue, releaseByValue, receivedByValue, selectedApproverId, requestType, reason || null, 'pending']
+      'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, type, reason, status, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP) RETURNING *',
+      [createdBy, teamLeaderNameValue, teamLeaderPhoneValue, projectName, ispNameValue, location, deploymentValue, releaseByValue, receivedByValue, requestType, reason || null, 'pending']
     );
     const requestId = requestResult.rows[0].id;
+
+    // Insert into junction table for each approver
+    for (const approverId of selectedApproverIds) {
+      await client.query(
+        'INSERT INTO request_approvers (request_id, approver_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [requestId, approverId]
+      );
+    }
+
     for (const item of items) {
       const selectedItem = await client.query('SELECT id FROM items WHERE name = $1', [item.name]);
       if (selectedItem.rowCount === 0) throw new Error(`Item not found: ${item.name}`);
@@ -1237,7 +1247,7 @@ export async function createRequest(requestData, selectedApproverId, requestType
     }
 
     // Log audit
-    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_id: selectedApproverId, type: requestType });
+    await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_ids: selectedApproverIds, type: requestType });
 
     await client.query('COMMIT');
     return requestResult.rows[0];
@@ -1250,23 +1260,29 @@ export async function createRequest(requestData, selectedApproverId, requestType
   }
 }
 
+// Updated getRequests to aggregate approver_names from junction table
 export async function getRequests(userRole, userId) {
   try {
     let query = `
       SELECT r.*, r.type, r.reason,
              (SELECT reason FROM rejections WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS reject_reason,
              COUNT(ri.id) AS item_count,
-             COALESCE(u.first_name || ' ' || u.last_name, 'Unassigned') AS approver_name
+             COALESCE(
+               (SELECT STRING_AGG(u.first_name || ' ' || u.last_name, ', ') 
+                FROM request_approvers ra 
+                JOIN users u ON ra.approver_id = u.id 
+                WHERE ra.request_id = r.id), 
+               'Unassigned'
+             ) AS approver_names
       FROM requests r
       LEFT JOIN request_items ri ON r.id = ri.request_id
-      LEFT JOIN users u ON r.selected_approver_id = u.id
     `;
     let params = [];
-    let whereClause = ' GROUP BY r.id, r.type, r.reason, reject_reason, u.first_name, u.last_name';
+    let whereClause = ' GROUP BY r.id, r.type, r.reason, reject_reason';
     let orderBy = ' ORDER BY r.created_at DESC';
 
     if (userRole === 'approver') {
-      query += ` WHERE (r.status != 'pending' OR (r.status = 'pending' AND r.selected_approver_id = $1))`;
+      query += ` WHERE (r.status != 'pending' OR (r.status = 'pending' AND EXISTS (SELECT 1 FROM request_approvers ra WHERE ra.request_id = r.id AND ra.approver_id = $1)))`;
       params.push(userId);
     }
 
@@ -1361,7 +1377,7 @@ export async function approveRequest(requestId, approverData, userId, ip) {
       'SELECT COUNT(*) AS count FROM approvals WHERE request_id = $1',
       [requestId]
     );
-    if (parseInt(approvalCount.rows[0].count, 10) >= 1) {  // Single initial approval
+    if (parseInt(approvalCount.rows[0].count, 10) >= 1) {  // Single initial approval (for multi, could adjust to require all)
       await client.query(
         'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
         ['approved', requestId]
@@ -1443,6 +1459,7 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
   }
 }
 
+// Updated getRequestDetails to include approvers array from junction
 export async function getRequestDetails(requestId) {
   try {
     const request = await pool.query(
@@ -1466,11 +1483,25 @@ export async function getRequestDetails(requestId) {
       'SELECT * FROM rejections WHERE request_id = $1 ORDER BY created_at DESC',
       [requestId]
     );
+    // New: Fetch approvers
+    const approvers = await pool.query(`
+      SELECT u.id, u.first_name, u.last_name, u.username, ra.assigned_at
+      FROM request_approvers ra
+      JOIN users u ON ra.approver_id = u.id
+      WHERE ra.request_id = $1
+      ORDER BY ra.assigned_at ASC
+    `, [requestId]);
     return {
       ...request.rows[0],
       items: items.rows,
       approvals: approvals.rows,
       rejections: rejections.rows,
+      approvers: approvers.rows.map(row => ({
+        id: row.id,
+        fullName: `${row.first_name} ${row.last_name}`.trim(),
+        username: row.username,
+        assigned_at: row.assigned_at
+      }))
     };
   } catch (error) {
     console.error('Error fetching request details:', error.stack);

@@ -1,4 +1,4 @@
-// Updated api.ts with support for item returns (type and reason fields)
+// Updated api.ts with support for multi-approver selection and item returns
 const API_URL = 'http://172.20.1.87:3001/api';
 
 export const BASE_URL = API_URL.replace('/api', '');
@@ -86,7 +86,7 @@ interface Request {
   updated_at: string;
   item_count: number;
   reject_reason?: string | null; // Added for quick access in lists
-  approver_name?: string;
+  approver_names?: string; // Updated to comma-separated for multi-approvers
 }
 
 interface RequestDetails extends Request {
@@ -113,6 +113,12 @@ interface RequestDetails extends Request {
     rejector_name: string;
     reason: string;
     created_at: string;
+  }[];
+  approvers?: { // New: array of approvers for details view
+    id: number;
+    fullName: string;
+    username: string;
+    assigned_at: string;
   }[];
 }
 
@@ -612,14 +618,19 @@ export const createRequest = async (requestData: {
   receivedBy?: string | null; // Optional for returns
   reason?: string; // Optional for requests, required for returns
   items: { name: string; requested: number }[];
-}, selectedApproverId: number, type: 'material_request' | 'item_return' = 'material_request'): Promise<Request> => {
+}, selectedApproverIds: number[], type: 'material_request' | 'item_return' = 'material_request'): Promise<Request> => {
+  // Client-side validation to prevent unnecessary server call
+  if (selectedApproverIds.length === 0) {
+    throw new Error('At least one approver must be selected.');
+  }
+
   try {
     const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ...requestData, selectedApproverId, type }),
+      body: JSON.stringify({ ...requestData, selectedApproverIds, type }),
     });
     return await response.json();
   } catch (error) {

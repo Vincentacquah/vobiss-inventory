@@ -133,6 +133,24 @@ export async function sendUserCredentials(email, username, password) {
             .credentials strong { 
               color: #0c4a6e; 
             }
+            .login-button { 
+              display: inline-block; 
+              background: linear-gradient(135deg, #2E7D32, #4CAF50); 
+              color: white; 
+              padding: 14px 28px; 
+              text-decoration: none; 
+              border-radius: 8px; 
+              font-weight: bold; 
+              font-size: 16px; 
+              margin: 25px 0; 
+              text-align: center; 
+              box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3); 
+              transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .login-button:hover { 
+              transform: translateY(-2px); 
+              box-shadow: 0 6px 16px rgba(46, 125, 50, 0.4); 
+            }
             .footer { 
               text-align: center; 
               font-size: 14px; 
@@ -166,6 +184,9 @@ export async function sendUserCredentials(email, username, password) {
                 <p><em>Please log in and change your password immediately for security.</em></p>
               </div>
               <p>If you have any questions or did not request this account, please contact your administrator.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="http://vsl-inventory.vobiss.com.gh:3001/login" class="login-button" style="display: inline-block; background: linear-gradient(135deg, #2E7D32, #4CAF50); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 25px 0; text-align: center; box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3);">Login to Your Account</a>
+              </div>
             </div>
             <div class="footer">
               <p>Best regards,<br><strong>Vobiss Inventory Management System</strong></p>
@@ -258,6 +279,24 @@ export async function sendResetPassword(email, username, password) {
             .credentials strong { 
               color: #991b1b; 
             }
+            .login-button { 
+              display: inline-block; 
+              background: linear-gradient(135deg, #2E7D32, #4CAF50); 
+              color: white; 
+              padding: 14px 28px; 
+              text-decoration: none; 
+              border-radius: 8px; 
+              font-weight: bold; 
+              font-size: 16px; 
+              margin: 25px 0; 
+              text-align: center; 
+              box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3); 
+              transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .login-button:hover { 
+              transform: translateY(-2px); 
+              box-shadow: 0 6px 16px rgba(46, 125, 50, 0.4); 
+            }
             .footer { 
               text-align: center; 
               font-size: 14px; 
@@ -291,6 +330,9 @@ export async function sendResetPassword(email, username, password) {
                 <p><em>Please log in and change your password immediately for security.</em></p>
               </div>
               <p>If you did not request this reset, please contact your administrator immediately.</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="http://vsl-inventory.vobiss.com.gh:3001/login" class="login-button" style="display: inline-block; background: linear-gradient(135deg, #2E7D32, #4CAF50); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 25px 0; text-align: center; box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3);">Login to Your Account</a>
+              </div>
             </div>
             <div class="footer">
               <p>Best regards,<br><strong>Vobiss Inventory Management System</strong></p>
@@ -482,6 +524,24 @@ export async function sendLowStockAlert(lowStockItemsParam = null, supervisorsPa
               tr:nth-child(even) { 
                 background: #f8f9fa; 
               }
+              .login-button { 
+                display: inline-block; 
+                background: linear-gradient(135deg, #2E7D32, #4CAF50); 
+                color: white; 
+                padding: 14px 28px; 
+                text-decoration: none; 
+                border-radius: 8px; 
+                font-weight: bold; 
+                font-size: 16px; 
+                margin: 25px 0; 
+                text-align: center; 
+                box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3); 
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+              }
+              .login-button:hover { 
+                transform: translateY(-2px); 
+                box-shadow: 0 6px 16px rgba(46, 125, 50, 0.4); 
+              }
               .footer { 
                 text-align: center; 
                 font-size: 14px; 
@@ -521,6 +581,9 @@ export async function sendLowStockAlert(lowStockItemsParam = null, supervisorsPa
                 <p class="intro">${introText}</p>
                 ${criticalTable}
                 ${lowTable}
+                <div style="text-align: center; margin: 30px 0;">
+                  <a href="http://vsl-inventory.vobiss.com.gh:3001/login" class="login-button" style="display: inline-block; background: linear-gradient(135deg, #2E7D32, #4CAF50); color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 25px 0; text-align: center; box-shadow: 0 4px 12px rgba(46, 125, 50, 0.3);">Login to Manage Inventory</a>
+                </div>
                 <p class="intro" style="font-style: italic; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">This is an automated summary. For real-time updates, check the dashboard.</p>
               </div>
               <div class="footer">
