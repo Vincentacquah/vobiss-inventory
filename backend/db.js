@@ -1,4 +1,4 @@
-// Updated db.js with type and reason support for requests/returns
+// Updated db.js with developer code for backup and restore
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
@@ -26,6 +26,9 @@ const pool = new Pool({
   user: process.env.PG_USER,
   password: String(process.env.PG_PASSWORD || ''),
 });
+
+// Developer code for wipe, backup, restore (can be moved to env in production)
+const DEVELOPER_CODE = process.env.DEVELOPER_CODE || 'DEVELOPER_WIPE_2025';
 
 // Function to generate unique 6-character password
 function generatePassword() {
@@ -82,6 +85,113 @@ async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
     console.log(`Column "${columnName}" added to table "${tableName}" or already exists.`);
   } catch (error) {
     console.warn(`Warning adding column "${columnName}" to "${tableName}":`, error.message);
+  }
+}
+
+// Database backup function (updated to require developer code)
+export async function backupDatabase(developerCode) {
+  if (developerCode !== DEVELOPER_CODE) {
+    throw new Error('Invalid developer code');
+  }
+  try {
+    const tables = [
+      'users', 'supervisors', 'settings', 'audit_logs', 'categories', 'vendors',
+      'items', 'items_out', 'requests', 'request_items', 'approvals', 'rejections'
+    ];
+    const backup = {};
+    for (const table of tables) {
+      const result = await pool.query(`SELECT * FROM ${table}`);
+      backup[table] = result.rows;
+    }
+    console.log('Database backup completed successfully.');
+    return backup;
+  } catch (error) {
+    console.error('Error creating database backup:', error.stack);
+    throw error;
+  }
+}
+
+// Database restore function (updated to require developer code, fixed to preserve original IDs and reset sequences)
+export async function restoreDatabase(backupData, developerCode) {
+  if (developerCode !== DEVELOPER_CODE) {
+    throw new Error('Invalid developer code');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Truncate tables in reverse dependency order (CASCADE handles FK)
+    const truncateOrder = [
+      'audit_logs', 'rejections', 'approvals', 'request_items', 'requests',
+      'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
+    ];
+    for (const table of truncateOrder) {
+      await client.query(`TRUNCATE TABLE ${table} CASCADE`);
+    }
+
+    // Insert tables in dependency order, preserving original IDs
+    const insertOrder = [
+      'users', 'supervisors', 'settings', 'categories', 'vendors', 'items',
+      'items_out', 'requests', 'request_items', 'approvals', 'rejections', 'audit_logs'
+    ];
+    for (const table of insertOrder) {
+      if (!backupData[table] || backupData[table].length === 0) {
+        // For empty tables, reset sequence to 1
+        await client.query(`SELECT setval('${table}_id_seq', 1, false);`);
+        continue;
+      }
+      for (const row of backupData[table]) {
+        const keys = Object.keys(row);
+        const columns = keys.join(', ');
+        const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+        const values = keys.map(key => row[key]);
+        await client.query(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
+      }
+      // Reset sequence after inserting
+      const maxId = Math.max(...backupData[table].map(r => r.id || 0));
+      const isCalled = maxId > 0;
+      await client.query(`SELECT setval('${table}_id_seq', ${maxId}, ${isCalled});`);
+    }
+
+    await client.query('COMMIT');
+    console.log('Database restore completed successfully.');
+    return { message: 'Database restored successfully' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error restoring database:', error.stack);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Database wipe function (requires developer code)
+export async function wipeDatabase(developerCode) {
+  if (developerCode !== DEVELOPER_CODE) {
+    throw new Error('Invalid developer code');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Truncate all tables (CASCADE handles FK)
+    const truncateOrder = [
+      'audit_logs', 'rejections', 'approvals', 'request_items', 'requests',
+      'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
+    ];
+    for (const table of truncateOrder) {
+      await client.query(`TRUNCATE TABLE ${table} CASCADE`);
+    }
+
+    await client.query('COMMIT');
+    console.log('Database wiped successfully.');
+    return { message: 'Database wiped successfully' };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error wiping database:', error.stack);
+    throw error;
+  } finally {
+    client.release();
   }
 }
 

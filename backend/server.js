@@ -1,4 +1,4 @@
-// Updated server.js to handle type and reason in requests
+// Updated server.js with developer code for backup and restore
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -18,7 +18,7 @@ import {
   getSupervisors, addSupervisor, updateSupervisor, deleteSupervisor,
   initDB, getSettings, updateSetting,
   getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser,
-  getApprovers
+  getApprovers, backupDatabase, restoreDatabase, wipeDatabase
 } from './db.js';
 import pool from './db.js';
 import { sendLowStockAlert } from './emailService.js';
@@ -122,7 +122,7 @@ async function seedDefaultUser() {
     const defaultLastName = 'Super';
     const defaultUsername = 'superadmin';
     const defaultEmail = 'admin@vobiss.com';
-    const defaultPassword = await bcrypt.hash('admin123', 10);
+    const defaultPassword = await bcrypt.hash('vobissadmin-v', 10);
     const defaultRole = 'superadmin';
     const existing = await getUserByUsername(defaultUsername);
     if (!existing) {
@@ -130,7 +130,7 @@ async function seedDefaultUser() {
         'INSERT INTO users (first_name, last_name, username, email, password, role) VALUES ($1, $2, $3, $4, $5, $6)',
         [defaultFirstName, defaultLastName, defaultUsername, defaultEmail, defaultPassword, defaultRole]
       );
-      console.log('Default user created: Super Admin / admin123');
+      console.log('Default user created: Super Admin / *****');
     } else {
       console.log('Default user already exists');
     }
@@ -226,6 +226,52 @@ app.post('/api/settings/:key', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error updating setting:', error.stack);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Backup endpoint (updated to require developer code)
+app.post('/api/backup', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { developerCode } = req.body;
+    if (!developerCode) {
+      return res.status(400).json({ error: 'Developer code is required' });
+    }
+    const backup = await backupDatabase(developerCode);
+    res.json(backup);
+  } catch (error) {
+    console.error('Error creating backup:', error.stack);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Restore endpoint (updated to require developer code)
+app.post('/api/restore', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { backup, developerCode } = req.body;
+    if (!backup || !developerCode) {
+      return res.status(400).json({ error: 'Backup data and developer code are required' });
+    }
+    const backupData = typeof backup === 'string' ? JSON.parse(backup) : backup;
+    await restoreDatabase(backupData, developerCode);
+    res.json({ message: 'Database restored successfully' });
+  } catch (error) {
+    console.error('Error restoring database:', error.stack);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Wipe endpoint
+app.post('/api/wipe', authenticateToken, requireSuperAdmin, async (req, res) => {
+  try {
+    const { developerCode } = req.body;
+    if (!developerCode) {
+      return res.status(400).json({ error: 'Developer code is required' });
+    }
+    const result = await wipeDatabase(developerCode);
+    res.json(result);
+  } catch (error) {
+    console.error('Error wiping database:', error.stack);
+    res.status(400).json({ error: error.message });
   }
 });
 

@@ -1,6 +1,6 @@
-// Updated AuthContext.tsx
+// Updated AuthContext.tsx with inactivity logout
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom'; // NEW: For auto-redirect on logout
+import { useNavigate } from 'react-router-dom';
 
 interface User {
   username: string;
@@ -31,15 +31,17 @@ export const useAuth = () => {
   return context;
 };
 
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes in milliseconds
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null); // Will load from localStorage below
-  const navigate = useNavigate(); // NEW: For redirect
+  const [token, setToken] = useState<string | null>(null);
+  const navigate = useNavigate();
 
-  // NEW: Load persisted state on mount (token + user as fallback)
+  // Load persisted state on mount (token + user as fallback)
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user'); // NEW: Load full user if available
+    const savedUser = localStorage.getItem('user');
 
     if (savedToken) {
       setToken(savedToken);
@@ -58,7 +60,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, []);
 
-  // UPDATED: Derive user from token only if no saved user (fallback)
+  // Derive user from token only if no saved user (fallback)
   useEffect(() => {
     if (token && !user) { // Only if user not already loaded
       try {
@@ -72,19 +74,19 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           full_name: payload.full_name
         };
         setUser(derivedUser);
-        // NEW: Save derived user for future loads
+        // Save derived user for future loads
         localStorage.setItem('user', JSON.stringify(derivedUser));
       } catch (error) {
         console.error('Invalid token');
         setToken(null);
         localStorage.removeItem('token');
-        localStorage.removeItem('user'); // NEW: Clear invalid user too
+        localStorage.removeItem('user');
         setUser(null);
       }
     }
   }, [token, user]); // Depend on user to avoid loops
 
-  // UPDATED: Persist user on login/change
+  // Persist user on login/change
   useEffect(() => {
     if (user) {
       localStorage.setItem('user', JSON.stringify(user));
@@ -97,11 +99,10 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setToken(newToken);
     localStorage.setItem('token', newToken);
     setUser(userData);
-    // NEW: Optional - navigate to dashboard after login (adjust path)
-    // navigate('/dashboard', { replace: true });
+    resetInactivityTimer();
   };
 
-  // UPDATED: Logout with API call + redirect
+  // Logout with API call + redirect
   const logout = async () => {
     const currentToken = localStorage.getItem('token');
     try {
@@ -120,11 +121,50 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
     setToken(null);
     localStorage.removeItem('token');
-    localStorage.removeItem('user'); // NEW: Clear user too
+    localStorage.removeItem('user');
     setUser(null);
-    // NEW: Redirect to login
+    // Redirect to login
     navigate('/login', { replace: true });
+    clearInactivityTimer();
   };
+
+  // Inactivity timer logic
+  let inactivityTimer: NodeJS.Timeout;
+
+  const resetInactivityTimer = () => {
+    clearInactivityTimer();
+    inactivityTimer = setTimeout(() => {
+      console.log('Inactivity detected. Logging out...');
+      logout();
+      alert('You have been logged out due to inactivity. Please log in again.');
+    }, INACTIVITY_TIMEOUT);
+  };
+
+  const clearInactivityTimer = () => {
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer);
+    }
+  };
+
+  // Reset timer on user activity (mousemove, keydown, scroll, etc.)
+  useEffect(() => {
+    if (!user) return;
+
+    const handleActivity = () => {
+      resetInactivityTimer();
+    };
+
+    const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
+    events.forEach(event => window.addEventListener(event, handleActivity, true));
+
+    // Initial timer setup
+    resetInactivityTimer();
+
+    return () => {
+      events.forEach(event => window.removeEventListener(event, handleActivity, true));
+      clearInactivityTimer();
+    };
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, token, login, logout }}>
