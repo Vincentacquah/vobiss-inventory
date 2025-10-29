@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ScatterChart, Scatter, ZAxis } from 'recharts';
-import { Calendar, TrendingUp, Download, Filter, RefreshCw, ChevronDown, ChevronUp, Settings, BarChart2, PieChart as PieChartIcon, Users, FileText, Package, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Calendar, TrendingUp, Download, Filter, RefreshCw, ChevronDown, ChevronUp, Settings, BarChart2, PieChart as PieChartIcon, Users, FileText, Package, ArrowUpCircle, ArrowDownCircle, Eye, EyeOff } from 'lucide-react';
 import { getItemsOut, getCategories, getRequests, getRequestDetails, getItems } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-
 interface UsageData {
   date: string;
   formattedDate: string;
@@ -20,7 +19,6 @@ interface UsageData {
   stock_before?: number;
   stock_after?: number;
 }
-
 interface UsageTracking {
   date: string;
   items_out: number;
@@ -31,20 +29,17 @@ interface UsageTracking {
   source_request: number;
   source_return: number;
 }
-
 interface TopItem {
   name: string;
   count: number;
   category: string;
   source: 'direct' | 'request' | 'return';
 }
-
 interface TopUser {
   name: string;
   count: number;
   source: 'direct' | 'request' | 'return';
 }
-
 interface ItemOut {
   id: string;
   person_name: string;
@@ -54,7 +49,6 @@ interface ItemOut {
   item_name: string;
   category_name: string;
 }
-
 interface CombinedTransaction extends ItemOut {
   source: 'direct' | 'request' | 'return';
   requester?: string;
@@ -62,19 +56,16 @@ interface CombinedTransaction extends ItemOut {
   current_stock?: number;
   transaction_type: 'out' | 'in';
 }
-
 interface Category {
   id: string;
   name: string;
 }
-
 interface Item {
   id: string;
   name: string;
   category_name: string;
   quantity: number;
 }
-
 interface Request {
   id: number;
   created_by: string;
@@ -94,14 +85,12 @@ interface Request {
     }[];
   };
 }
-
 interface CustomTooltipProps {
   active?: boolean;
   payload?: any[];
   label?: string;
   formatDate: (dateStr: string) => string;
 }
-
 const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, formatDate }) => {
   if (active && payload && payload.length) {
     const formattedLabel = formatDate(label || '');
@@ -118,7 +107,6 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label, f
   }
   return null;
 };
-
 const Reports: React.FC = () => {
   const [usageData, setUsageData] = useState<UsageData[]>([]);
   const [topItemsOut, setTopItemsOut] = useState<TopItem[]>([]);
@@ -137,13 +125,12 @@ const Reports: React.FC = () => {
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie' | 'scatter'>('bar');
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [showSettings, setShowSettings] = useState<boolean>(true);
+  const [showTransactions, setShowTransactions] = useState<boolean>(false);
   const { toast } = useToast();
-
   useEffect(() => {
     loadReportData(startDate, endDate);
   }, [startDate, endDate]);
-
   const formatDateForDisplay = useCallback((dateStr: string) => {
     const date = new Date(dateStr);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -153,7 +140,6 @@ const Reports: React.FC = () => {
     const year = date.getFullYear();
     return `${dayName}, ${day}/${month}/${year}`;
   }, []);
-
   const formatDate = useCallback((dateTime: string) => {
     const date = new Date(dateTime);
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -168,7 +154,6 @@ const Reports: React.FC = () => {
       time: `${hours}:${minutes}`
     };
   }, []);
-
   // Compute historical stock snapshots for all transactions
   const computeHistoricalStocks = useCallback((allTransactions: CombinedTransaction[], itemsData: Item[]) => {
     // Group transactions by item_id
@@ -179,20 +164,16 @@ const Reports: React.FC = () => {
       }
       itemGroups[trans.item_id].push(trans);
     });
-
     // For each item, compute running stock backwards from current
     Object.keys(itemGroups).forEach((itemId) => {
       const group = itemGroups[itemId];
       const currentItem = itemsData.find((i: Item) => i.id.toString() === itemId);
       let runningStock = currentItem?.quantity || 0;
-
       // Sort by date_time descending (newest first)
       group.sort((a, b) => new Date(b.date_time).getTime() - new Date(a.date_time).getTime());
-
       group.forEach((trans) => {
         // Assign stock AFTER this transaction
         trans.current_stock = runningStock;
-
         // Undo the transaction to get stock before it
         const qty = trans.quantity || 0;
         if (trans.transaction_type === 'out') {
@@ -204,32 +185,28 @@ const Reports: React.FC = () => {
         }
       });
     });
-
     return allTransactions;
   }, []);
-
   const loadReportData = async (start: string, end: string) => {
     try {
       setIsLoading(true);
       const [itemsOutData, categoriesData, requestsData, itemsData] = await Promise.all([
-        getItemsOut(), 
-        getCategories(), 
-        getRequests(), 
+        getItemsOut(),
+        getCategories(),
+        getRequests(),
         getItems()
       ]);
-      
+     
       if (!Array.isArray(categoriesData)) {
         throw new Error('Invalid categories data');
       }
       if (!Array.isArray(itemsData)) {
         throw new Error('Invalid items data');
       }
-
       // Fetch details for ALL completed material requests (outgoings) - no date filter yet
       const allCompletedRequests = requestsData.filter((r: Request) => r.status === 'completed' && r.type === 'material_request');
       const allRequestDetailsPromises = allCompletedRequests.map((r: Request) => getRequestDetails(r.id));
       const allRequestDetailsArray = await Promise.all(allRequestDetailsPromises);
-
       // Create flat issuances from ALL completed requests
       const allRequestIssuances: CombinedTransaction[] = [];
       allRequestDetailsArray.forEach((details, index) => {
@@ -257,12 +234,10 @@ const Reports: React.FC = () => {
           });
         }
       });
-
       // Fetch details for ALL completed item returns (incomings)
       const allCompletedReturns = requestsData.filter((r: Request) => r.status === 'completed' && r.type === 'item_return');
       const allReturnDetailsPromises = allCompletedReturns.map((r: Request) => getRequestDetails(r.id));
       const allReturnDetailsArray = await Promise.all(allReturnDetailsPromises);
-
       // Create flat returns from ALL completed return requests
       const allReturnIssuances: CombinedTransaction[] = [];
       allReturnDetailsArray.forEach((details, index) => {
@@ -290,11 +265,10 @@ const Reports: React.FC = () => {
           });
         }
       });
-
       // Combine ALL direct issuances, request issuances, and return issuances
       let allTransactions: CombinedTransaction[] = [
-        ...itemsOutData.map((io: ItemOut) => ({ 
-          ...io, 
+        ...itemsOutData.map((io: ItemOut) => ({
+          ...io,
           source: 'direct' as const,
           requester: undefined,
           approver: undefined,
@@ -303,13 +277,10 @@ const Reports: React.FC = () => {
         ...allRequestIssuances,
         ...allReturnIssuances,
       ];
-
       // Compute historical stocks for ALL transactions
       allTransactions = computeHistoricalStocks(allTransactions, itemsData);
-
       // Now sort all by date_time
       allTransactions.sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
-
       // Filter by date range
       const startDateTime = new Date(start + 'T00:00:00');
       const endDateTime = new Date(end + 'T23:59:59.999');
@@ -317,28 +288,26 @@ const Reports: React.FC = () => {
         const transDate = new Date(trans.date_time);
         return transDate >= startDateTime && transDate <= endDateTime;
       });
-
       // Separate issuances (out) and returns (in)
       const filteredIssuancesLocal = filteredAll.filter(t => t.transaction_type === 'out');
       const filteredReturnsLocal = filteredAll.filter(t => t.transaction_type === 'in');
       setFilteredIssuances(filteredIssuancesLocal);
       setFilteredReturns(filteredReturnsLocal);
-
       const usageByDateTemp = generateUsageByDate(filteredAll, start, end);
-      
+     
       // Compute current total and all-time totals
       const currentTotalLocal = itemsData.reduce((sum, i) => sum + (i.quantity || 0), 0);
       setCurrentTotal(currentTotalLocal);
-      
+     
       const allOutLocal = allTransactions.filter(t => t.transaction_type === 'out').reduce((s, t) => s + (t.quantity || 0), 0);
       const allInLocal = allTransactions.filter(t => t.transaction_type === 'in').reduce((s, t) => s + (t.quantity || 0), 0);
       setAllOutTotal(allOutLocal);
       setAllInTotal(allInLocal);
-      
+     
       // Compute range sums
       const sumOutRange = usageByDateTemp.reduce((s, d) => s + d.items_out, 0);
       const sumInRange = usageByDateTemp.reduce((s, d) => s + d.items_in, 0);
-      
+     
       // Compute stock snapshots
       let runningStock = currentTotalLocal - sumInRange + sumOutRange; // stock before first day
       usageByDateTemp.forEach((day) => {
@@ -346,15 +315,12 @@ const Reports: React.FC = () => {
         runningStock += day.net_change;
         day.stock_after = runningStock;
       });
-      
+     
       setUsageData(usageByDateTemp);
-
       const itemUsageOut = generateTopItems(filteredIssuancesLocal, categoriesData, 'out');
       setTopItemsOut(itemUsageOut);
-
       const itemUsageIn = generateTopItems(filteredReturnsLocal, categoriesData, 'in');
       setTopItemsIn(itemUsageIn);
-
       const userUsage = generateTopUsers(filteredAll);
       setTopUsers(userUsage);
     } catch (error) {
@@ -377,28 +343,25 @@ const Reports: React.FC = () => {
       setIsLoading(false);
     }
   };
-
   const generateUsageByDate = (transactions: CombinedTransaction[], startStr: string, endStr: string): UsageData[] => {
     const dateMap: { [key: string]: UsageTracking } = {};
     const start = new Date(startStr + 'T00:00:00');
     const end = new Date(endStr + 'T23:59:59.999');
     let current = new Date(start);
-
     while (current <= end) {
       const dateStr = current.toISOString().split('T')[0];
-      dateMap[dateStr] = { 
-        date: dateStr, 
-        items_out: 0, 
-        items_in: 0, 
+      dateMap[dateStr] = {
+        date: dateStr,
+        items_out: 0,
+        items_in: 0,
         net_change: 0,
-        users: new Set<string>(), 
-        source_direct: 0, 
+        users: new Set<string>(),
+        source_direct: 0,
         source_request: 0,
-        source_return: 0 
+        source_return: 0
       };
       current.setDate(current.getDate() + 1);
     }
-
     transactions.forEach((trans) => {
       const dateStr = new Date(trans.date_time).toISOString().split('T')[0];
       if (dateMap[dateStr]) {
@@ -419,7 +382,6 @@ const Reports: React.FC = () => {
         }
       }
     });
-
     return Object.values(dateMap)
       .sort((a, b) => a.date.localeCompare(b.date))
       .map((entry) => ({
@@ -434,15 +396,12 @@ const Reports: React.FC = () => {
         source_return: entry.source_return,
       }));
   };
-
   const generateTopItems = (transactions: CombinedTransaction[], categories: Category[], type: 'out' | 'in'): TopItem[] => {
     const itemCounts: { [key: string]: { count: number; name: string; category: string; source: 'direct' | 'request' | 'return' } } = {};
-
     transactions.forEach((record) => {
       const itemId = record.item_id;
       const itemName = record.item_name || 'Unknown Item';
       const categoryName = record.category_name || 'Uncategorized';
-
       if (!itemCounts[itemId]) {
         itemCounts[itemId] = { count: 0, name: itemName, category: categoryName, source: record.source };
       } else if (itemCounts[itemId].source !== record.source) {
@@ -450,7 +409,6 @@ const Reports: React.FC = () => {
       }
       itemCounts[itemId].count += record.quantity || 0;
     });
-
     return Object.values(itemCounts)
       .map((item) => ({
         name: item.name,
@@ -461,10 +419,8 @@ const Reports: React.FC = () => {
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
   };
-
   const generateTopUsers = (transactions: CombinedTransaction[]): TopUser[] => {
     const userCounts: { [key: string]: { count: number; source: 'direct' | 'request' | 'return' } } = {};
-
     transactions.forEach((record) => {
       const personName = record.person_name || 'Unknown';
       if (!userCounts[personName]) {
@@ -474,13 +430,11 @@ const Reports: React.FC = () => {
       }
       userCounts[personName].count += record.quantity || 0;
     });
-
     return Object.entries(userCounts)
       .map(([name, data]) => ({ name, count: data.count, source: data.source }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
   };
-
   // Helper to add blank rows in Excel when date changes
   const addBlankRowsOnDateChange = (sheet: any, transactions: CombinedTransaction[], formatDateFn: (dt: string) => { fullDate: string }) => {
     let prevDate = '';
@@ -495,7 +449,6 @@ const Reports: React.FC = () => {
       prevDate = fullDate;
     });
   };
-
   const handleExport = async () => {
     if (filteredIssuances.length === 0 && filteredReturns.length === 0) {
       toast({
@@ -505,11 +458,9 @@ const Reports: React.FC = () => {
       });
       return;
     }
-
     try {
       const workbook = new ExcelJS.Workbook();
       const filename = `inventory-report-${startDate}-to-${endDate}.xlsx`;
-
       // Group transactions by date for mini-tables
       const issuancesByDate: Record<string, CombinedTransaction[]> = {};
       filteredIssuances.forEach((trans) => {
@@ -523,13 +474,11 @@ const Reports: React.FC = () => {
         if (!returnsByDate[dateKey]) returnsByDate[dateKey] = [];
         returnsByDate[dateKey].push(trans);
       });
-
       // Sheet 1: Daily Summary (Main sheet)
       const summarySheet = workbook.addWorksheet('Daily Summary');
       summarySheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       // Headers for Summary
       const summaryHeaders = ['Date', 'Stock Before', 'Items Issued (Direct/Req)', 'Items Returned', 'Net Change (Positive = Gain)', 'Stock After', 'Active Users'];
       summarySheet.addRow(summaryHeaders);
@@ -539,7 +488,6 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FF4472C4' }
       };
-
       // Add summary data with mini-tables
       let currentRow = 2;
       usageData.forEach((day) => {
@@ -552,7 +500,6 @@ const Reports: React.FC = () => {
         summarySheet.getCell(`F${dayRow}`).value = { formula: `B${dayRow} + E${dayRow}` };
         summarySheet.getCell(`G${dayRow}`).value = day.users;
         currentRow = dayRow + 1;
-
         // Issued mini-table
         const dateKey = day.date;
         const dayIss = issuancesByDate[dateKey] || [];
@@ -561,7 +508,6 @@ const Reports: React.FC = () => {
           summarySheet.getCell(`A${currentRow}`).value = `Issued Items - ${day.formattedDate}`;
           summarySheet.getCell(`A${currentRow}`).font = { bold: true, size: 12 };
           currentRow++;
-
           // Sub-headers
           summarySheet.getCell(`A${currentRow}`).value = 'Item Name';
           summarySheet.getCell(`B${currentRow}`).value = 'Category';
@@ -570,7 +516,6 @@ const Reports: React.FC = () => {
           summarySheet.getCell(`E${currentRow}`).value = 'Stock After Issuance (Historical Balance)';
           summarySheet.getRow(currentRow).font = { bold: true };
           currentRow++;
-
           dayIss.forEach((iss) => {
             summarySheet.getCell(`A${currentRow}`).value = iss.item_name || 'Unknown Item';
             summarySheet.getCell(`B${currentRow}`).value = iss.category_name || 'Uncategorized';
@@ -579,7 +524,6 @@ const Reports: React.FC = () => {
             summarySheet.getCell(`E${currentRow}`).value = iss.current_stock || 0;
             currentRow++;
           });
-
           // Subtotal
           summarySheet.getCell(`A${currentRow}`).value = 'Daily Issued Total:';
           summarySheet.getCell(`C${currentRow}`).value = day.items_out;
@@ -591,7 +535,6 @@ const Reports: React.FC = () => {
           summarySheet.getCell(`A${currentRow}`).font = { italic: true };
           currentRow++;
         }
-
         // Returns mini-table
         const dayRet = returnsByDate[dateKey] || [];
         if (dayRet.length > 0) {
@@ -599,7 +542,6 @@ const Reports: React.FC = () => {
           summarySheet.getCell(`A${currentRow}`).value = `Returned Items - ${day.formattedDate}`;
           summarySheet.getCell(`A${currentRow}`).font = { bold: true, size: 12 };
           currentRow++;
-
           // Sub-headers
           summarySheet.getCell(`A${currentRow}`).value = 'Item Name';
           summarySheet.getCell(`B${currentRow}`).value = 'Category';
@@ -607,7 +549,6 @@ const Reports: React.FC = () => {
           summarySheet.getCell(`D${currentRow}`).value = 'Stock After Return (Historical Balance)';
           summarySheet.getRow(currentRow).font = { bold: true };
           currentRow++;
-
           dayRet.forEach((ret) => {
             summarySheet.getCell(`A${currentRow}`).value = ret.item_name || 'Unknown Item';
             summarySheet.getCell(`B${currentRow}`).value = ret.category_name || 'Uncategorized';
@@ -615,7 +556,6 @@ const Reports: React.FC = () => {
             summarySheet.getCell(`D${currentRow}`).value = ret.current_stock || 0;
             currentRow++;
           });
-
           // Subtotal
           summarySheet.getCell(`A${currentRow}`).value = 'Daily Returned Total:';
           summarySheet.getCell(`C${currentRow}`).value = day.items_in;
@@ -628,7 +568,6 @@ const Reports: React.FC = () => {
           currentRow++;
         }
       });
-
       // Grand totals
       const totalItemsIssued = usageData.reduce((sum, day) => sum + day.items_out, 0);
       const totalItemsReturned = usageData.reduce((sum, day) => sum + day.items_in, 0);
@@ -651,7 +590,6 @@ const Reports: React.FC = () => {
       } else if (totalNetChange > 0) {
         summarySheet.getCell(`E${grandRow}`).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E8' } };
       }
-
       // Conditional formatting for Net Change column
       const lastSummaryRow = grandRow;
       summarySheet.addConditionalFormatting({
@@ -669,19 +607,16 @@ const Reports: React.FC = () => {
           }
         ]
       });
-
       // Column widths for summary
       summarySheet.columns = [
         { width: 20 }, { width: 12 }, { width: 22 }, { width: 12 },
         { width: 15 }, { width: 12 }, { width: 12 }
       ];
-
       // Sheet 2: Overall Inventory History
       const overallSheet = workbook.addWorksheet('Overall Inventory History');
       overallSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       const overallHeaders = ['Event', 'Quantity Change', 'Running Total', 'Notes'];
       overallSheet.addRow(overallHeaders);
       overallSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -690,7 +625,6 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FF4472C4' }
       };
-
       const initialStockApprox = currentTotal + allOutTotal - allInTotal;
       let runningOverall = initialStockApprox;
       overallSheet.addRow(['Initial Stock (Approximated)', '', initialStockApprox, 'Reverse calc: Current Stock + All Issued Ever - All Returned Ever']);
@@ -700,7 +634,6 @@ const Reports: React.FC = () => {
       overallSheet.addRow(['Total Outflows (All Issued Ever)', -allOutTotal, runningOverall, 'Direct + Requests']);
       overallSheet.addRow(['Net Lifetime Change', allInTotal - allOutTotal, runningOverall, '']);
       overallSheet.addRow(['Current Total Stock', '', currentTotal, `As of ${new Date().toLocaleDateString()}, total stock left: ${currentTotal} (down ${((initialStockApprox - currentTotal) / initialStockApprox * 100).toFixed(1)}% from start)`]);
-
       // Chart data section (for reference, chart addition removed due to compatibility)
       const chartStartRow = 10;
       overallSheet.getCell(`A${chartStartRow}`).value = 'Category';
@@ -711,17 +644,14 @@ const Reports: React.FC = () => {
       overallSheet.getCell(`A${chartStartRow + 2}`).value = 'Total Returned';
       overallSheet.getCell(`B${chartStartRow + 2}`).value = allInTotal;
       overallSheet.getCell(`A${chartStartRow + 3}`).value = 'Note: Pie chart for % distribution can be manually added in Excel using this data.';
-
       overallSheet.columns = [
         { width: 30 }, { width: 15 }, { width: 15 }, { width: 40 }
       ];
-
       // Sheet 3: Issuances (Out)
       const issuancesSheet = workbook.addWorksheet('Issuances (Out)');
       issuancesSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       // Headers for Issuances
       const issuanceHeaders = [
         'Date',
@@ -742,10 +672,8 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FF4472C4' }
       };
-
       // Sort issuances by date_time
       const sortedIssuances = [...filteredIssuances].sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
-
       // Add data rows with blank spacing on date change
       let totalQtyIssued = 0;
       let prevDate = '';
@@ -773,19 +701,16 @@ const Reports: React.FC = () => {
         totalQtyIssued += iss.quantity || 0;
         prevDate = fullDate;
       });
-
       // Total row for issuances
       const totalIssuanceRow = issuancesSheet.addRow(['', '', '', '', `Total Issued: ${totalQtyIssued}`, '', '', '', '', '']);
       totalIssuanceRow.font = { bold: true };
       totalIssuanceRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-
       // Column widths
       issuancesSheet.columns = [
         { width: 20 }, { width: 12 }, { width: 25 }, { width: 15 },
         { width: 15 }, { width: 18 }, { width: 15 }, { width: 15 },
         { width: 15 }, { width: 15 }
       ];
-
       // Conditional formatting for Source in issuances
       const lastRowIss = issuancesSheet.rowCount;
       issuancesSheet.addConditionalFormatting({
@@ -805,13 +730,11 @@ const Reports: React.FC = () => {
           }
         ]
       });
-
       // Sheet 4: Returns (In)
       const returnsSheet = workbook.addWorksheet('Returns (In)');
       returnsSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       // Headers for Returns
       const returnHeaders = [
         'Date',
@@ -831,10 +754,8 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FF70AD47' }
       };
-
       // Sort returns by date_time
       const sortedReturns = [...filteredReturns].sort((a, b) => new Date(a.date_time).getTime() - new Date(b.date_time).getTime());
-
       // Add data rows with blank spacing on date change
       let totalQtyReturned = 0;
       prevDate = '';
@@ -861,24 +782,20 @@ const Reports: React.FC = () => {
         totalQtyReturned += ret.quantity || 0;
         prevDate = fullDate;
       });
-
       // Total row for returns
       const totalReturnRow = returnsSheet.addRow(['', '', '', '', `Total Returned: ${totalQtyReturned}`, '', '', '', '']);
       totalReturnRow.font = { bold: true };
       totalReturnRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
-
       // Column widths for returns
       returnsSheet.columns = [
         { width: 20 }, { width: 12 }, { width: 25 }, { width: 15 },
         { width: 15 }, { width: 18 }, { width: 15 }, { width: 15 }, { width: 15 }
       ];
-
       // Sheet 5: Top Items Issued
       const itemsOutSheet = workbook.addWorksheet('Top Items Issued');
       itemsOutSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       const itemOutHeaders = ['Rank', 'Item Name', 'Category', 'Source', 'Quantity Issued'];
       itemsOutSheet.addRow(itemOutHeaders);
       itemsOutSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -887,21 +804,17 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FFED7D31' }
       };
-
       topItemsOut.forEach((item, index) => {
         itemsOutSheet.addRow([index + 1, item.name, item.category, item.source, item.count]);
       });
-
       itemsOutSheet.columns = [
         { width: 8 }, { width: 30 }, { width: 20 }, { width: 10 }, { width: 15 }
       ];
-
       // Sheet 6: Top Items Returned
       const itemsInSheet = workbook.addWorksheet('Top Items Returned');
       itemsInSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       const itemInHeaders = ['Rank', 'Item Name', 'Category', 'Quantity Returned'];
       itemsInSheet.addRow(itemInHeaders);
       itemsInSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -910,21 +823,17 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FF70AD47' }
       };
-
       topItemsIn.forEach((item, index) => {
         itemsInSheet.addRow([index + 1, item.name, item.category, item.count]);
       });
-
       itemsInSheet.columns = [
         { width: 8 }, { width: 30 }, { width: 20 }, { width: 15 }
       ];
-
       // Sheet 7: Top Users
       const usersSheet = workbook.addWorksheet('Top Users');
       usersSheet.views = [
         { state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }
       ];
-
       const userHeaders = ['Rank', 'User Name', 'Source', 'Total Quantity'];
       usersSheet.addRow(userHeaders);
       usersSheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -933,20 +842,16 @@ const Reports: React.FC = () => {
         pattern: 'solid',
         fgColor: { argb: 'FFED7D31' }
       };
-
       topUsers.forEach((user, index) => {
         usersSheet.addRow([index + 1, user.name, user.source, user.count]);
       });
-
       usersSheet.columns = [
         { width: 8 }, { width: 25 }, { width: 10 }, { width: 15 }
       ];
-
       // Generate and download
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       saveAs(blob, filename);
-
       toast({
         title: 'Success',
         description: `Enhanced Excel report exported successfully (with Daily Summary, Overall History, and breakdowns)`,
@@ -960,7 +865,6 @@ const Reports: React.FC = () => {
       });
     }
   };
-
   const totalItemsIssued = usageData.reduce((sum, day) => sum + day.items_out, 0);
   const totalItemsReturned = usageData.reduce((sum, day) => sum + day.items_in, 0);
   const totalNetChange = usageData.reduce((sum, day) => sum + day.net_change, 0);
@@ -971,18 +875,15 @@ const Reports: React.FC = () => {
   const totalRequest = usageData.reduce((sum, day) => sum + day.source_request, 0);
   const totalReturn = usageData.reduce((sum, day) => sum + day.source_return, 0);
   const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#10B981'];
-
   const formattedStartDate = formatDateForDisplay(startDate);
   const formattedEndDate = formatDateForDisplay(endDate);
   const isSingleDay = startDate === endDate;
-
   const tooltipContent = useCallback(({ active, payload, label }: any) => {
     return <CustomTooltip active={active} payload={payload} label={label} formatDate={formatDateForDisplay} />;
   }, [formatDateForDisplay]);
-
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Reports</h1>
           <p className="text-gray-600 mt-1">Analyze comprehensive usage trends, including issuances, returns, and net stock changes</p>
@@ -994,7 +895,7 @@ const Reports: React.FC = () => {
             onClick={() => setShowSettings(!showSettings)}
           >
             <Settings className="h-4 w-4 mr-2" />
-            Settings
+            {showSettings ? 'Hide' : 'Show'} Settings
             {showSettings ? <ChevronUp className="h-4 w-4 ml-2" /> : <ChevronDown className="h-4 w-4 ml-2" />}
           </Button>
           <Button onClick={handleExport} className="bg-green-600 hover:bg-green-700 text-white" disabled={filteredIssuances.length === 0 && filteredReturns.length === 0}>
@@ -1003,36 +904,35 @@ const Reports: React.FC = () => {
           </Button>
         </div>
       </div>
-
       {showSettings && (
-        <div className="mb-6 bg-white p-4 rounded-xl border border-gray-200 shadow-sm animate-in slide-in-from-top-2 duration-300">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">Start Date</label>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">End Date</label>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Chart Type</label>
-              <div className="flex space-x-2">
+              <label className="block text-sm font-medium text-gray-700 mb-3">Chart Type</label>
+              <div className="grid grid-cols-2 gap-2">
                 <Button
                   variant={chartType === 'bar' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setChartType('bar')}
-                  className={`flex-1 ${chartType === 'bar' ? 'bg-blue-500 text-white' : 'bg-white'}`}
+                  className={`h-10 ${chartType === 'bar' ? 'bg-blue-500 text-white' : 'bg-white border-gray-300'}`}
                 >
                   <BarChart2 className="h-4 w-4 mr-1" /> Bar
                 </Button>
@@ -1040,7 +940,7 @@ const Reports: React.FC = () => {
                   variant={chartType === 'line' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setChartType('line')}
-                  className={`flex-1 ${chartType === 'line' ? 'bg-green-500 text-white' : 'bg-white'}`}
+                  className={`h-10 ${chartType === 'line' ? 'bg-green-500 text-white' : 'bg-white border-gray-300'}`}
                 >
                   <TrendingUp className="h-4 w-4 mr-1" /> Line
                 </Button>
@@ -1048,7 +948,7 @@ const Reports: React.FC = () => {
                   variant={chartType === 'pie' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setChartType('pie')}
-                  className={`flex-1 ${chartType === 'pie' ? 'bg-purple-500 text-white' : 'bg-white'}`}
+                  className={`h-10 ${chartType === 'pie' ? 'bg-purple-500 text-white' : 'bg-white border-gray-300'}`}
                 >
                   <PieChartIcon className="h-4 w-4 mr-1" /> Pie
                 </Button>
@@ -1056,32 +956,41 @@ const Reports: React.FC = () => {
                   variant={chartType === 'scatter' ? 'default' : 'outline'}
                   size="sm"
                   onClick={() => setChartType('scatter')}
-                  className={`flex-1 ${chartType === 'scatter' ? 'bg-orange-500 text-white' : 'bg-white'}`}
+                  className={`h-10 ${chartType === 'scatter' ? 'bg-orange-500 text-white' : 'bg-white border-gray-300'}`}
                 >
                   <Package className="h-4 w-4 mr-1" /> Scatter
                 </Button>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Actions</label>
-              <Button variant="outline" size="sm" className="bg-white w-full" onClick={() => loadReportData(startDate, endDate)}>
-                <RefreshCw className="h-4 w-4 mr-2" /> Refresh Data
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">Actions</label>
+                <Button variant="outline" size="sm" className="w-full h-10 bg-white border-gray-300" onClick={() => loadReportData(startDate, endDate)}>
+                  <RefreshCw className="h-4 w-4 mr-2" /> Refresh Data
+                </Button>
+              </div>
+              <Button 
+                variant={showTransactions ? "default" : "outline"} 
+                size="sm" 
+                className={`w-full h-10 ${showTransactions ? 'bg-blue-500 text-white' : 'bg-white border-gray-300'} transition-colors`}
+                onClick={() => setShowTransactions(!showTransactions)}
+              >
+                {showTransactions ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+                {showTransactions ? 'Hide' : 'View'} Transactions
               </Button>
             </div>
           </div>
         </div>
       )}
-
       {isLoading && (
         <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading comprehensive report data...</p>
         </div>
       )}
-
       {!isLoading && usageData.length > 0 && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between">
                 <div>
@@ -1122,8 +1031,7 @@ const Reports: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-900 flex items-center">
@@ -1201,7 +1109,7 @@ const Reports: React.FC = () => {
               <div className="space-y-4">
                 {topItemsOut.length > 0 ? (
                   topItemsOut.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100">
                       <div className="flex items-center">
                         <div className={`w-3 h-3 rounded-full mr-3 ${item.source === 'direct' ? 'bg-blue-500' : 'bg-purple-500'}`}></div>
                         <div>
@@ -1226,8 +1134,7 @@ const Reports: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
               <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
                 <BarChart2 className="h-5 w-5 mr-2 text-green-600" />
@@ -1236,7 +1143,7 @@ const Reports: React.FC = () => {
               <div className="space-y-4">
                 {topItemsIn.length > 0 ? (
                   topItemsIn.map((item, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div key={index} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100">
                       <div className="flex items-center">
                         <div className="w-3 h-3 rounded-full mr-3 bg-green-500"></div>
                         <div>
@@ -1268,7 +1175,7 @@ const Reports: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                 {topUsers.length > 0 ? (
                   topUsers.map((user, index) => (
-                    <div key={index} className="text-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                    <div key={index} className="text-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-100">
                       <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 border-2 ${user.source === 'direct' ? 'bg-blue-100 border-blue-200' : user.source === 'request' ? 'bg-purple-100 border-purple-200' : 'bg-green-100 border-green-200'}`}>
                         <span className={`text-xl font-bold ${user.source === 'direct' ? 'text-blue-600' : user.source === 'request' ? 'text-purple-600' : 'text-green-600'}`}>{user.name.charAt(0)}</span>
                       </div>
@@ -1289,7 +1196,126 @@ const Reports: React.FC = () => {
               </div>
             </div>
           </div>
-
+          {showTransactions && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-200">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">📋 Transaction Details</h3>
+                <p className="text-sm text-gray-600">Detailed view of all issuances and returns within the selected date range.</p>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {filteredIssuances.length > 0 && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                        <FileText className="h-5 w-5 mr-2 text-indigo-600" />
+                        Issuances ({totalItemsIssued} total)
+                      </h2>
+                      <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">Out</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock After</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Issuer</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {filteredIssuances.slice(0, 20).map((iss, index) => {
+                            const { fullDate, time } = formatDate(iss.date_time);
+                            return (
+                              <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                  <div className="font-medium">{fullDate}</div>
+                                  <div className="text-gray-500 text-xs">{time}</div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{iss.item_name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{iss.category_name || 'Uncategorized'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">{iss.quantity}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{iss.current_stock || 0}</td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                    iss.source === 'direct'
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : 'bg-purple-100 text-purple-800'
+                                  }`}>
+                                    {iss.source.charAt(0).toUpperCase() + iss.source.slice(1)}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-4 text-sm font-medium text-gray-900">{iss.person_name}</td>
+                              </tr>
+                            );
+                          })}
+                          {filteredIssuances.length > 20 && (
+                            <tr>
+                              <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
+                                Showing first 20 of {filteredIssuances.length} issuances. Export for full details.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+                {filteredReturns.length > 0 && (
+                  <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+                    <div className="flex items-center justify-between mb-6">
+                      <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                        <FileText className="h-5 w-5 mr-2 text-green-600" />
+                        Returns ({totalItemsReturned} total)
+                      </h2>
+                      <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-medium rounded-full">In</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date & Time</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock After</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Returner</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {filteredReturns.slice(0, 20).map((ret, index) => {
+                            const { fullDate, time } = formatDate(ret.date_time);
+                            return (
+                              <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                  <div className="font-medium">{fullDate}</div>
+                                  <div className="text-gray-500 text-xs">{time}</div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{ret.item_name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{ret.category_name || 'Uncategorized'}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-semibold">{ret.quantity}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{ret.current_stock || 0}</td>
+                                <td className="px-6 py-4 text-sm font-medium text-gray-900">{ret.person_name}</td>
+                              </tr>
+                            );
+                          })}
+                          {filteredReturns.length > 20 && (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-4 text-center text-sm text-gray-500">
+                                Showing first 20 of {filteredReturns.length} returns. Export for full details.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {isSingleDay && (filteredIssuances.length > 0 || filteredReturns.length > 0) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {filteredIssuances.length > 0 && (
@@ -1329,8 +1355,8 @@ const Reports: React.FC = () => {
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-medium">{iss.current_stock || 0}</td>
                               <td className="px-6 py-4 whitespace-nowrap">
                                 <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                  iss.source === 'direct' 
-                                    ? 'bg-blue-100 text-blue-800' 
+                                  iss.source === 'direct'
+                                    ? 'bg-blue-100 text-blue-800'
                                     : 'bg-purple-100 text-purple-800'
                                 }`}>
                                   {iss.source.charAt(0).toUpperCase() + iss.source.slice(1)}
@@ -1396,7 +1422,6 @@ const Reports: React.FC = () => {
           )}
         </>
       )}
-
       {!isLoading && usageData.length === 0 && (
         <div className="text-center py-12">
           <p className="text-gray-500 text-lg">No data available for the selected date range.</p>
@@ -1406,5 +1431,4 @@ const Reports: React.FC = () => {
     </div>
   );
 };
-
 export default Reports;
