@@ -64,6 +64,27 @@ async function createTableIfNotExists(query, tableName) {
   }
 }
 
+// Helper function to add column if not exists using DO block
+async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
+  const query = `
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_name = '${tableName}' AND column_name = '${columnName}'
+        ) THEN
+            ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition};
+        END IF;
+    END $$;
+  `;
+  try {
+    await pool.query(query);
+    console.log(`Column "${columnName}" added to table "${tableName}" or already exists.`);
+  } catch (error) {
+    console.warn(`Warning adding column "${columnName}" to "${tableName}":`, error.message);
+  }
+}
+
 // Initialize database tables with enhanced error handling
 export async function initDB() {
   try {
@@ -81,11 +102,12 @@ export async function initDB() {
       );
     `, 'users');
 
-    // Add/migrate columns for users if needed
+    // Add/migrate columns for users if needed (using helper for conditional add)
     try {
-      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255) NOT NULL DEFAULT '';`);
-      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255) NOT NULL DEFAULT '';`);
-      await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE NOT NULL DEFAULT '';`);
+      await addColumnIfNotExists('users', 'first_name', 'VARCHAR(255) NOT NULL DEFAULT \'\'');
+      await addColumnIfNotExists('users', 'last_name', 'VARCHAR(255) NOT NULL DEFAULT \'\'');
+      await addColumnIfNotExists('users', 'email', 'VARCHAR(255) UNIQUE NOT NULL DEFAULT \'\'');
+      // Drop defaults after adding (safe if column exists)
       await pool.query(`ALTER TABLE users ALTER COLUMN first_name DROP DEFAULT;`);
       await pool.query(`ALTER TABLE users ALTER COLUMN last_name DROP DEFAULT;`);
       await pool.query(`ALTER TABLE users ALTER COLUMN email DROP DEFAULT;`);
@@ -174,9 +196,7 @@ export async function initDB() {
 
     // Migrate vendor_id if needed
     try {
-      await pool.query(`
-        ALTER TABLE items ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id);
-      `);
+      await addColumnIfNotExists('items', 'vendor_id', 'INTEGER REFERENCES vendors(id)');
       console.log('Items vendor_id migration completed.');
     } catch (alterError) {
       if (!alterError.message.includes('already exists')) {
@@ -221,15 +241,9 @@ export async function initDB() {
 
     // Migrate selected_approver_id, type, and reason if needed
     try {
-      await pool.query(`
-        ALTER TABLE requests ADD COLUMN IF NOT EXISTS selected_approver_id INTEGER REFERENCES users(id);
-      `);
-      await pool.query(`
-        ALTER TABLE requests ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return'));
-      `);
-      await pool.query(`
-        ALTER TABLE requests ADD COLUMN IF NOT EXISTS reason TEXT;
-      `);
+      await addColumnIfNotExists('requests', 'selected_approver_id', 'INTEGER REFERENCES users(id)');
+      await addColumnIfNotExists('requests', 'type', "VARCHAR(50) DEFAULT 'material_request' CHECK (type IN ('material_request', 'item_return'))");
+      await addColumnIfNotExists('requests', 'reason', 'TEXT');
       console.log('Requests migrations (approver_id, type, reason) completed.');
     } catch (alterError) {
       if (!alterError.message.includes('already exists')) {
@@ -830,7 +844,18 @@ export async function updateItem(itemId, itemData, userId, ip) {
     // Get current data for update_reasons and receipt_images
     const itemCurrentResult = await client.query('SELECT update_reasons, receipt_images FROM items WHERE id = $1', [itemId]);
     let currentReasons = itemCurrentResult.rows[0].update_reasons || '';
-    let currentReceiptImages = itemCurrentResult.rows[0].receipt_images ? JSON.parse(itemCurrentResult.rows[0].receipt_images) : [];
+    let currentReceiptImages;
+    const receiptImagesValue = itemCurrentResult.rows[0].receipt_images;
+    if (receiptImagesValue && typeof receiptImagesValue === 'string' && receiptImagesValue.trim() !== '') {
+      try {
+        currentReceiptImages = JSON.parse(receiptImagesValue);
+      } catch (parseError) {
+        console.warn('Failed to parse existing receipt_images, defaulting to empty array:', parseError.message);
+        currentReceiptImages = [];
+      }
+    } else {
+      currentReceiptImages = [];
+    }
     const timestamp = new Date().toLocaleString();
     const newReasonEntry = `${update_reason} at ${timestamp}`;
     const newReasons = currentReasons ? `${currentReasons} | ${newReasonEntry}` : newReasonEntry;
@@ -915,7 +940,15 @@ export async function deleteItem(itemId, userId, ip) {
     // Delete associated receipt images
     const itemResult = await client.query('SELECT receipt_images, name FROM items WHERE id = $1', [itemId]);
     if (itemResult.rowCount > 0) {
-      const receiptImages = itemResult.rows[0].receipt_images ? JSON.parse(itemResult.rows[0].receipt_images) : [];
+      let receiptImages = [];
+      const receiptImagesValue = itemResult.rows[0].receipt_images;
+      if (receiptImagesValue && typeof receiptImagesValue === 'string' && receiptImagesValue.trim() !== '') {
+        try {
+          receiptImages = JSON.parse(receiptImagesValue);
+        } catch (parseError) {
+          console.warn('Failed to parse receipt_images for deletion, skipping:', parseError.message);
+        }
+      }
       receiptImages.forEach((imgObj) => {
         const imgPath = imgObj.path;
         try {
