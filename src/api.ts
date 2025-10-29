@@ -1,6 +1,8 @@
 // Updated api.ts with support for item returns (type and reason fields)
 const API_URL = 'http://172.20.1.87:3001/api';
 
+export const BASE_URL = API_URL.replace('/api', '');
+
 // Helper to get auth header
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
@@ -414,7 +416,11 @@ export const addItem = async (formData: FormData): Promise<Item> => {
       headers: getAuthHeader(), // No Content-Type for FormData
       body: formData,
     });
-    return await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      throw new Error('Server returned empty response for addItem');
+    }
+    return JSON.parse(text);
   } catch (error) {
     console.error('Error adding item:', error);
     throw error;
@@ -428,7 +434,11 @@ export const updateItem = async (itemId: number, formData: FormData): Promise<It
       headers: getAuthHeader(), // No Content-Type for FormData
       body: formData,
     });
-    return await response.json();
+    const text = await response.text();
+    if (!text.trim()) {
+      throw new Error('Server returned empty response for updateItem');
+    }
+    return JSON.parse(text);
   } catch (error) {
     console.error('Error updating item:', error);
     throw error;

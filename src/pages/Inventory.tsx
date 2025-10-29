@@ -5,9 +5,6 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import ItemForm from '../components/ItemForm';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://172.20.1.87:3001/api';
-const BASE_URL = API_URL.replace('/api', '');
-
 /**
  * Inventory Component
  * Manages and displays inventory items with filtering, adding, editing, and deletion capabilities
@@ -177,9 +174,6 @@ const Inventory = () => {
    */
   const handleSaveItem = async (itemData: any, receiptFile: File | null = null, itemId: number | null = null) => {
     try {
-      const token = localStorage.getItem('token');
-      if (!token) throw new Error('No access token found. Please log in.');
-
       const formData = new FormData();
       formData.append('name', itemData.name);
       formData.append('description', itemData.description || '');
@@ -193,22 +187,14 @@ const Inventory = () => {
       if (receiptFile) formData.append('receiptImage', receiptFile);
       if (itemId && itemData.updateReason) formData.append('update_reason', itemData.updateReason);
 
-      const url = itemId ? `${API_URL}/items/${itemId}` : `${API_URL}/items`;
-      const method = itemId ? 'PUT' : 'POST';
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Failed to ${itemId ? 'update' : 'add'} item`);
+      if (itemId) {
+        await api.updateItem(itemId, formData);
+        toast({ title: "Success", description: 'Item updated successfully' });
+      } else {
+        await api.addItem(formData);
+        toast({ title: "Success", description: 'Item added successfully' });
       }
 
-      await response.json();
-      toast({ title: "Success", description: `${itemId ? 'Item updated' : 'Item added'} successfully` });
       setShowAddForm(false);
       setExpandedItemId(null);
       loadData();
@@ -368,7 +354,7 @@ const Inventory = () => {
                     className="relative group"
                   >
                     <img
-                      src={`${BASE_URL}${receipt.path}`}
+                      src={`${api.BASE_URL}${receipt.path}`}
                       alt={`Receipt ${index + 1}`}
                       className="w-full h-24 object-cover rounded-lg border cursor-pointer hover:opacity-80"
                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
@@ -418,7 +404,7 @@ const Inventory = () => {
   const ReceiptModal = () => {
     if (!showReceiptModal || galleryReceipts.length === 0) return null;
     const currentReceipt = galleryReceipts[currentReceiptIndex];
-    const fullUrl = `${BASE_URL}${currentReceipt.path}`;
+    const fullUrl = `${api.BASE_URL}${currentReceipt.path}`;
     const prevReceipt = () => setCurrentReceiptIndex((i) => (i - 1 + galleryReceipts.length) % galleryReceipts.length);
     const nextReceipt = () => setCurrentReceiptIndex((i) => (i + 1) % galleryReceipts.length);
 
@@ -477,7 +463,7 @@ const Inventory = () => {
                   }`}
                 >
                   <img
-                    src={`${BASE_URL}${receipt.path}`}
+                    src={`${api.BASE_URL}${receipt.path}`}
                     alt={`Thumbnail ${index + 1}`}
                     className="w-full h-full object-cover rounded"
                     onError={(e) => { e.currentTarget.style.display = 'none'; }}
