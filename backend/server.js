@@ -381,6 +381,9 @@ app.get('/api/items', authenticateToken, async (req, res) => {
 
 app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
+    console.log('Add item request - Body:', req.body);  // Enhanced logging
+    console.log('Add item request - File:', req.file ? req.file.filename : 'No file');  // Log file upload
+
     const itemData = req.body;
     let receiptImages = [];
     if (req.file) {
@@ -388,6 +391,9 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
     }
     const ip = getClientIp(req);
     const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip);
+
+    console.log('Add item success - Returned item:', item);  // Log successful response
+
     const parsedQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
     // Only trigger alert if the newly added item is low stock
@@ -399,18 +405,23 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
     }
     res.status(201).json(item);
   } catch (error) {
-    console.error('Error adding item:', error.stack);
-    res.status(500).json({ error: error.message });
+    console.error('Error adding item - Full stack:', error.stack);  // Enhanced error logging
+    console.error('Error adding item - Body was:', req.body);  // Log request data on error
+    res.status(500).json({ error: `Failed to add item: ${error.message}` });
   }
 });
 
 app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
     const itemId = parseInt(req.params.id);
+    console.log(`Update item request for ID ${itemId} - Body:`, req.body);  // Enhanced logging
+    console.log(`Update item request for ID ${itemId} - File:`, req.file ? req.file.filename : 'No file');  // Log file upload
+
     const currentItems = await getItems();
     const currentItem = currentItems.find(item => item.id === itemId);
     
     if (!currentItem) {
+      console.warn(`Update item - Item ${itemId} not found`);
       return res.status(404).json({ error: 'Item not found' });
     }
 
@@ -418,7 +429,8 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
     let receiptImages = [];
     try {
       receiptImages = typeof currentItem.receipt_images === 'string' ? JSON.parse(currentItem.receipt_images) : currentItem.receipt_images || [];
-    } catch (e) {
+    } catch (parseError) {
+      console.warn(`Update item - Failed to parse receipt_images:`, parseError);
       receiptImages = [];
     }
 
@@ -429,6 +441,8 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
     const updatedItemData = { ...itemData, receipt_images: JSON.stringify(receiptImages) };
     const ip = getClientIp(req);
     const item = await updateItem(itemId, updatedItemData, req.user.id, ip);
+
+    console.log(`Update item success for ID ${itemId} - Returned item:`, item);  // Log successful response
 
     // Check if quantity decreased and now <= threshold (newly low or lower)
     const oldQuantity = parseInt(currentItem.quantity, 10);
@@ -442,13 +456,17 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
     }
     res.json(item);
   } catch (error) {
-    console.error('Error updating item:', error.stack);
-    res.status(error.message === 'Item not found' ? 404 : 500).json({ error: error.message });
+    console.error(`Error updating item ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error updating item ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error updating item ID ${req.params.id} - File was:`, req.file ? req.file.filename : 'No file');  // Log file on error
+    res.status(error.message === 'Item not found' ? 404 : 500).json({ error: `Failed to update item: ${error.message}` });
   }
 });
 
 app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
+    console.log(`Delete item request for ID ${req.params.id}`);  // Enhanced logging
+
     // Delete associated receipt images
     const currentItems = await getItems();
     const itemToDelete = currentItems.find(item => item.id === parseInt(req.params.id));
@@ -457,6 +475,7 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
       try {
         receiptImages = typeof itemToDelete.receipt_images === 'string' ? JSON.parse(itemToDelete.receipt_images) : itemToDelete.receipt_images || [];
       } catch (e) {
+        console.warn('Delete item - Failed to parse receipt_images:', e);
         receiptImages = [];
       }
       receiptImages.forEach(imgPath => {
@@ -470,9 +489,10 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
     
     const ip = getClientIp(req);
     const result = await deleteItem(req.params.id, req.user.id, ip);
+    console.log(`Delete item success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error deleting item:', error.stack);
+    console.error(`Error deleting item ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
     res.status(error.message === 'Item not found' ? 404 : 500).json({ error: error.message });
   }
 });
@@ -490,33 +510,41 @@ app.get('/api/categories', authenticateToken, async (req, res) => {
 
 app.post('/api/categories', authenticateToken, async (req, res) => {
   try {
+    console.log('Add category request - Body:', req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const category = await addCategory(req.body, req.user.id, ip);
+    console.log('Add category success - Returned:', category);  // Log success
     res.status(201).json(category);
   } catch (error) {
-    console.error('Error adding category:', error.stack);
+    console.error('Error adding category - Full stack:', error.stack);  // Enhanced error logging
+    console.error('Error adding category - Body was:', req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
 
 app.put('/api/categories/:id', authenticateToken, async (req, res) => {
   try {
+    console.log(`Update category request for ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const category = await updateCategory(req.params.id, req.body, req.user.id, ip);
+    console.log(`Update category success for ID ${req.params.id} - Returned:`, category);  // Log success
     res.json(category);
   } catch (error) {
-    console.error('Error updating category:', error.stack);
+    console.error(`Error updating category ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error updating category ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
     res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
   }
 });
 
 app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
+    console.log(`Delete category request for ID ${req.params.id}`);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await deleteCategory(req.params.id, req.user.id, ip);
+    console.log(`Delete category success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error deleting category:', error.stack);
+    console.error(`Error deleting category ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
     res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
   }
 });
@@ -572,15 +600,18 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
 // Updated Requests Routes (add support for type and reason)
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
+    console.log('Create request - Body:', req.body);  // Enhanced logging
     const { selectedApproverId, type = 'material_request', ...requestData } = req.body;
     if (!selectedApproverId) {
       return res.status(400).json({ error: 'Selected approver is required' });
     }
     const ip = getClientIp(req);
     const request = await createRequest(requestData, parseInt(selectedApproverId), type, req.user.id, ip);
+    console.log('Create request success:', request.id);  // Log success
     res.status(201).json(request);
   } catch (error) {
-    console.error('Error creating request:', error.stack);
+    console.error('Error creating request - Full stack:', error.stack);  // Enhanced error logging
+    console.error('Error creating request - Body was:', req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
@@ -597,46 +628,58 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
 
 app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
+    console.log(`Update request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await updateRequest(req.params.id, req.body, req.user.id, ip);
+    console.log(`Update request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error updating request:', error.stack);
+    console.error(`Error updating request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error updating request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (req, res) => {
   try {
+    console.log(`Reject request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const { reason, rejectorName } = req.body;
     const ip = getClientIp(req);
     const result = await rejectRequest(req.params.id, req.user.id, ip, { reason, rejectorName });
+    console.log(`Reject request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error rejecting request:', error.stack);
+    console.error(`Error rejecting request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error rejecting request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   try {
+    console.log(`Approve request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await approveRequest(req.params.id, req.body, req.user.id, ip);
+    console.log(`Approve request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error approving request:', error.stack);
+    console.error(`Error approving request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error approving request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdminOrIssuer, async (req, res) => {
   try {
+    console.log(`Finalize request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const { items, releasedBy } = req.body;
     const ip = getClientIp(req);
     const result = await finalizeRequest(req.params.id, items, releasedBy, req.user.id, ip);
+    console.log(`Finalize request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error('Error finalizing request:', error.stack);
+    console.error(`Error finalizing request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error finalizing request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
     res.status(500).json({ error: error.message });
   }
 });
