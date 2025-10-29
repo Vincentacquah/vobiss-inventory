@@ -13,12 +13,19 @@ const AuditLogs = () => {
   const [selectedUser, setSelectedUser] = useState('All');
   const [sortBy, setSortBy] = useState('user'); // Default sort by user
   const [loginStats, setLoginStats] = useState({ totalToday: 0, usersToday: {} });
-  const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+  const [filterDate, setFilterDate] = useState(() => new Date().toLocaleDateString('en-CA'));
   const [showAll, setShowAll] = useState(false);
   const [ipInfo, setIpInfo] = useState({}); // Cache for IP geo data
   const [currentPublicIP, setCurrentPublicIP] = useState('Loading...'); // Current viewer's public IP
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
+
+  // Helper to parse timestamp as UTC
+  const parseTimestamp = (timestamp) => {
+    if (!timestamp) return new Date(0);
+    const ts = timestamp.endsWith('Z') ? timestamp : timestamp + 'Z';
+    return new Date(ts);
+  };
 
   useEffect(() => {
     const fetchLogs = async () => {
@@ -111,18 +118,28 @@ const AuditLogs = () => {
     fetchLoginIpInfos();
   }, [filteredLogs]); // Re-run when filteredLogs change (e.g., new filters show new logins)
 
-  // Calculate daily login stats (group by user and date) - always for today
+  // Calculate daily login stats (group by user and date) - always for today, using local day boundaries
   const calculateLoginStats = (allLogs) => {
-    const today = new Date().toDateString();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+    const startMs = todayStart.getTime();
+    const endMs = todayEnd.getTime();
+
     const stats = { totalToday: 0, usersToday: {} };
 
     const loginLogs = allLogs.filter(log => log.action === 'login');
     loginLogs.forEach(log => {
-      const logDate = new Date(log.timestamp).toDateString();
-      if (logDate === today) {
-        stats.totalToday++;
-        const userKey = log.full_name || log.username || 'Anonymous';
-        stats.usersToday[userKey] = (stats.usersToday[userKey] || 0) + 1;
+      try {
+        const ts = log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z';
+        const logTime = new Date(ts).getTime();
+        if (logTime >= startMs && logTime < endMs) {
+          stats.totalToday++;
+          const userKey = log.full_name || log.username || 'Anonymous';
+          stats.usersToday[userKey] = (stats.usersToday[userKey] || 0) + 1;
+        }
+      } catch (e) {
+        console.error('Invalid timestamp in login stats:', log.timestamp);
       }
     });
 
@@ -158,7 +175,7 @@ const AuditLogs = () => {
 
   // Format date as "Tuesday dd/mm/yyyy"
   const formatDate = (timestamp) => {
-    const date = new Date(timestamp);
+    const date = parseTimestamp(timestamp);
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const dayName = days[date.getDay()];
     const day = date.getDate().toString().padStart(2, '0');
@@ -169,7 +186,7 @@ const AuditLogs = () => {
 
   // Format time as "HH:MM AM/PM"
   const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
+    const date = parseTimestamp(timestamp);
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
@@ -235,10 +252,28 @@ const AuditLogs = () => {
   useEffect(() => {
     let filtered = [...logs];
 
-    // Date filter
+    // Date filter using local day boundaries (UTC ms)
     if (!showAll && filterDate) {
-      const targetDateStr = new Date(filterDate).toDateString();
-      filtered = filtered.filter(log => new Date(log.timestamp).toDateString() === targetDateStr);
+      try {
+        const filterDateObj = new Date(filterDate + 'T00:00:00');
+        const startMs = filterDateObj.getTime();
+        const nextDay = new Date(filterDateObj);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const endMs = nextDay.getTime();
+
+        filtered = filtered.filter(log => {
+          try {
+            const ts = log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z';
+            const logTime = new Date(ts).getTime();
+            return logTime >= startMs && logTime < endMs;
+          } catch (e) {
+            console.error('Invalid log timestamp during filtering:', log.timestamp);
+            return false;
+          }
+        });
+      } catch (e) {
+        console.error('Invalid filter date:', filterDate);
+      }
     }
 
     // Search filter
@@ -258,7 +293,7 @@ const AuditLogs = () => {
     // Sort
     filtered.sort((a, b) => {
       if (sortBy === 'timestamp') {
-        return new Date(b.timestamp) - new Date(a.timestamp);
+        return parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime();
       } else if (sortBy === 'action') {
         return (a.action || '').localeCompare(b.action || '');
       } else if (sortBy === 'user') {
@@ -474,7 +509,7 @@ const AuditLogs = () => {
               {Object.entries(loginStats.usersToday).map(([user, count]) => {
                 const lastLogin = logs
                   .filter(log => (log.full_name || log.username) === user && log.action === 'login')
-                  .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+                  .sort((a, b) => parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime())[0];
                 return (
                   <tr key={user} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user}</td>
