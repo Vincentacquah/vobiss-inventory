@@ -419,6 +419,24 @@ export async function initDB() {
       }
     }
 
+    // Seed default superadmin user: stockadmin
+    try {
+      const adminExists = await pool.query('SELECT id FROM users WHERE username = $1', ['stockadmin']);
+      if (adminExists.rowCount === 0) {
+        const plainPassword = 'ezekeil@vobissadmin';
+        const hashedPassword = await bcrypt.hash(plainPassword, 10);
+        await pool.query(
+          'INSERT INTO users (first_name, last_name, username, email, password, role, created_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)',
+          ['Stock', 'Admin', 'stockadmin', 'stockadmin@inventory.local', hashedPassword, 'superadmin']
+        );
+        console.log('Default superadmin user "stockadmin" created with password: ezekeil@vobissadmin');
+      } else {
+        console.log('Default superadmin user "stockadmin" already exists.');
+      }
+    } catch (seedError) {
+      console.warn('Error seeding default superadmin user:', seedError.message);
+    }
+
     console.log('Database initialization completed successfully. All tables are ready.');
   } catch (error) {
     console.error('Critical error during database initialization:', error.stack);

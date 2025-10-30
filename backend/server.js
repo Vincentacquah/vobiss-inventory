@@ -122,7 +122,7 @@ async function seedDefaultUser() {
     const defaultLastName = 'Super';
     const defaultUsername = 'superadmin';
     const defaultEmail = 'admin@vobiss.com';
-    const defaultPassword = await bcrypt.hash('vobissadmin-v', 10);
+    const defaultPassword = await bcrypt.hash('@vobissadmin-v', 10);
     const defaultRole = 'superadmin';
     const existing = await getUserByUsername(defaultUsername);
     if (!existing) {

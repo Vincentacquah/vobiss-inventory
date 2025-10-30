@@ -4,6 +4,7 @@ import { getRequests, approveRequest, rejectRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -319,28 +320,42 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 max-w-md mx-auto">
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Approver Name *</label>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Approver Name *</label>
+        <p className="text-xs text-gray-500 mb-2">Enter your full name as the approver.</p>
         <Input
           value={approverName}
           onChange={(e) => setApproverName(e.target.value)}
-          placeholder="Your full name"
-          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          placeholder="e.g., John Doe"
+          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Signature/Notes *</label>
-        <Input
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Digital Signature / Approval Notes *</label>
+        <p className="text-xs text-gray-500 mb-2">Provide your digital signature or detailed approval notes. Use multiple lines if needed for clarity.</p>
+        <Textarea
           value={signature}
           onChange={(e) => setSignature(e.target.value)}
-          placeholder="Digital signature or approval note"
-          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+          placeholder="e.g., Approved with no issues. Proceed to deployment. Signed: John Doe"
+          className="w-full h-32 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          rows={4}
         />
       </div>
-      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-        <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg">Cancel</Button>
-        <Button onClick={handleSubmit} className="bg-green-600 text-white hover:bg-green-700 rounded-lg">Approve</Button>
+      <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+        <Button 
+          variant="outline" 
+          onClick={onCancel} 
+          className="border-gray-300 rounded-lg px-6 py-2"
+        >
+          Cancel
+        </Button>
+        <Button 
+          onClick={handleSubmit} 
+          className="bg-green-600 text-white hover:bg-green-700 rounded-lg px-6 py-2 font-semibold"
+        >
+          Approve Request
+        </Button>
       </div>
     </div>
   );
@@ -363,19 +378,33 @@ const RejectForm: React.FC<RejectFormProps> = ({ onSave, onCancel }) => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 max-w-md mx-auto">
       <div className="space-y-2">
-        <label className="block text-sm font-medium text-gray-700">Rejection Reason *</label>
-        <Input
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Rejection Reason *</label>
+        <p className="text-xs text-gray-500 mb-2">Provide a detailed reason for rejection to help the requester understand and improve.</p>
+        <Textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Enter the reason for rejecting this request"
-          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
+          placeholder="e.g., Missing required documentation for the project. Please resubmit with attachments."
+          className="w-full h-40 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+          rows={6}
         />
       </div>
-      <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-        <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg">Cancel</Button>
-        <Button onClick={handleSubmit} variant="destructive" className="rounded-lg">Reject</Button>
+      <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+        <Button 
+          variant="outline" 
+          onClick={onCancel} 
+          className="border-gray-300 rounded-lg px-6 py-2"
+        >
+          Cancel
+        </Button>
+        <Button 
+          onClick={handleSubmit} 
+          variant="destructive" 
+          className="rounded-lg px-6 py-2 font-semibold"
+        >
+          Reject Request
+        </Button>
       </div>
     </div>
   );

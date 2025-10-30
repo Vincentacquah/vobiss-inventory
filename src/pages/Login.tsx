@@ -39,7 +39,7 @@ const Login = () => {
       case 'approver':
         return '/pending-approvals';
       case 'issuer':
-        return '/items-out';
+        return '/';
       case 'superadmin':
         return '/'; // Dashboard for overview
       default:

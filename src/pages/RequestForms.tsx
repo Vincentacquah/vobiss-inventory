@@ -55,6 +55,31 @@ const RequestForms: React.FC = () => {
     loadRequests();
     loadItems();
     loadApprovers();
+
+    // Check for draft on component mount and auto-open if valid
+    const DRAFT_KEY = 'requestFormDraft';
+    const TTL = 5 * 60 * 1000; // 5 minutes in ms
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const { timestamp } = parsed;
+        if (Date.now() - timestamp < TTL) {
+          toast({
+            title: "Draft Found",
+            description: "Opening form with your unsaved progress.",
+            variant: "default"
+          });
+          setIsFormOpen(true);
+          return;
+        } else {
+          localStorage.removeItem(DRAFT_KEY); // Clear expired draft
+        }
+      } catch (error) {
+        console.error('Error checking draft:', error);
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -375,6 +400,49 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
   const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  const DRAFT_KEY = 'requestFormDraft';
+  const TTL = 5 * 60 * 1000; // 5 minutes in ms
+
+  // Load draft from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem(DRAFT_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const { formData: savedFormData, selectedApproverIds: savedApproverIds, selectedItems: savedItems, showAllApprovers: savedShowAll, timestamp } = parsed;
+        if (Date.now() - timestamp < TTL) {
+          setFormData(savedFormData || formData);
+          setSelectedApproverIds(savedApproverIds || []);
+          setSelectedItems(savedItems || [{ name: '', requested: '' }]);
+          setShowAllApprovers(savedShowAll || false);
+          return;
+        } else {
+          localStorage.removeItem(DRAFT_KEY); // Clear expired draft
+        }
+      } catch (error) {
+        console.error('Error loading draft:', error);
+        localStorage.removeItem(DRAFT_KEY);
+      }
+    }
+  }, []);
+
+  // Save draft to localStorage when relevant states change
+  useEffect(() => {
+    const draft = {
+      formData,
+      selectedApproverIds,
+      selectedItems,
+      showAllApprovers,
+      timestamp: Date.now(),
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }, [formData, selectedApproverIds, selectedItems, showAllApprovers]);
+
+  // Clear draft after successful submit
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+  };
+
   // Handle Enter key navigation
   const handleKeyDown = (e: React.KeyboardEvent, nextRef: React.RefObject<HTMLInputElement | HTMLSelectElement> | null) => {
     if (e.key === 'Enter') {
@@ -459,6 +527,7 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     setSelectedApproverIds([]);
     setShowAllApprovers(false);
     setSelectedItems([{ name: '', requested: '' }]);
+    clearDraft(); // Clear the draft after successful submission
     setSubmitting(false);
   };
 

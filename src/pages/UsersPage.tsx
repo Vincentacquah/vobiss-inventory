@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getUsers, createUser, resetUserPassword, updateUserRole, updateUser, deleteUser } from '../api';
-import { UserPlus, Mail, Key, Users, AlertCircle, X, CheckCircle, Edit, Trash2 } from 'lucide-react';
+import { UserPlus, Mail, Key, Users, AlertCircle, X, CheckCircle, Edit, Trash2, Crown } from 'lucide-react';
 
 const UsersPage: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -59,6 +59,11 @@ const UsersPage: React.FC = () => {
   };
 
   const openResetModal = (userToReset: any) => {
+    if (userToReset.role === 'superadmin') {
+      setError('Cannot reset password for Super Admin');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
     setSelectedUser(userToReset);
     setShowResetModal(true);
   };
@@ -85,6 +90,11 @@ const UsersPage: React.FC = () => {
   };
 
   const openEditModal = (userToEdit: any) => {
+    if (userToEdit.username === 'superadmin') {
+      setError('Cannot edit Super Admin');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
     setEditingUser(userToEdit);
     setEditFormData({
       first_name: userToEdit.first_name || '',
@@ -129,6 +139,11 @@ const UsersPage: React.FC = () => {
   const openDeleteModal = (userToDelete: any) => {
     if (userToDelete.id === currentUser?.id) {
       setError('Cannot delete your own account');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+    if (userToDelete.username === 'Superadmin') {
+      setError('Cannot delete Super Admin');
       setTimeout(() => setError(''), 3000);
       return;
     }
@@ -180,6 +195,8 @@ const UsersPage: React.FC = () => {
     };
     return colors[role] || colors.requester;
   };
+
+  const isMainSuperadmin = (u: any) => u.username === 'superadmin';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4">
@@ -353,36 +370,45 @@ const UsersPage: React.FC = () => {
                         <div className="text-sm text-slate-600">{u.email}</div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          className={`text-xs font-medium px-2 py-1 rounded-full border ${getRoleBadgeColor(u.role)} cursor-pointer hover:opacity-80 transition`}
-                        >
-                          <option value="requester">Requester</option>
-                          <option value="approver">Approver</option>
-                          <option value="issuer">Issuer</option>
-                          <option value="superadmin">Super Admin</option>
-                        </select>
+                        {isMainSuperadmin(u) ? (
+                          <span className={`text-xs font-medium px-2 py-1 rounded-full border ${getRoleBadgeColor(u.role)} flex items-center`}>
+                            Super Admin <Crown className="w-3 h-3 ml-1" />
+                          </span>
+                        ) : (
+                          <select
+                            value={u.role}
+                            onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                            className={`text-xs font-medium px-2 py-1 rounded-full border ${getRoleBadgeColor(u.role)} cursor-pointer hover:opacity-80 transition`}
+                          >
+                            <option value="requester">Requester</option>
+                            <option value="approver">Approver</option>
+                            <option value="issuer">Issuer</option>
+                            <option value="superadmin">Super Admin</option>
+                          </select>
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm">
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => openEditModal(u)}
-                            className="text-blue-600 hover:text-blue-800 font-medium transition flex items-center gap-1 text-xs"
+                            disabled={isMainSuperadmin(u)}
+                            className={`${isMainSuperadmin(u) ? 'text-blue-300 cursor-not-allowed' : 'text-blue-600 hover:text-blue-800'} font-medium transition flex items-center gap-1 text-xs`}
                           >
                             <Edit className="w-3 h-3" />
                             Edit
                           </button>
                           <button
                             onClick={() => openResetModal(u)}
-                            className="text-gray-600 hover:text-gray-800 font-medium transition flex items-center gap-1 text-xs"
+                            disabled={u.role === 'superadmin'}
+                            className={`${u.role === 'superadmin' ? 'text-gray-300 cursor-not-allowed' : 'text-gray-600 hover:text-gray-800'} font-medium transition flex items-center gap-1 text-xs`}
                           >
                             <Key className="w-3 h-3" />
                             Reset
                           </button>
                           <button
                             onClick={() => openDeleteModal(u)}
-                            className="text-red-600 hover:text-red-800 font-medium transition flex items-center gap-1 text-xs"
+                            disabled={isMainSuperadmin(u)}
+                            className={`${isMainSuperadmin(u) ? 'text-red-300 cursor-not-allowed' : 'text-red-600 hover:text-red-800'} font-medium transition flex items-center gap-1 text-xs`}
                           >
                             <Trash2 className="w-3 h-3" />
                             Delete

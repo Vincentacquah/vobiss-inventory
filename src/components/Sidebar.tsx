@@ -1,4 +1,4 @@
-// Updated Sidebar.tsx with System Guide menu item
+// src/components/Sidebar.tsx
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
@@ -17,19 +17,20 @@ import {
   FileText as AuditIcon,
   Users,
   ArrowLeftCircle,
-  HelpCircle // New import for System Guide icon
+  HelpCircle
 } from 'lucide-react';
 import { getRequests, getLowStockItems } from '../api';
 import { useAuth } from '../context/AuthContext';
 
 const Sidebar = ({ isOpen, onToggle }) => {
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout } = useAuth(); // Fixed: Correct destructuring
   const [pendingCount, setPendingCount] = useState(0);
   const [approvedCount, setApprovedCount] = useState(0);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
+  // Load badge counts
   useEffect(() => {
     const loadCounts = async () => {
       try {
@@ -48,20 +49,17 @@ const Sidebar = ({ isOpen, onToggle }) => {
     };
 
     loadCounts();
-
-    const interval = setInterval(loadCounts, 10000); // Refresh every 10 seconds
-
+    const interval = setInterval(loadCounts, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Prevent body scroll on mobile when sidebar is open
+  // Prevent scroll on mobile
   useEffect(() => {
     if (isOpen && window.innerWidth < 1024) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
     }
-
     return () => {
       document.body.style.overflow = '';
     };
@@ -69,20 +67,23 @@ const Sidebar = ({ isOpen, onToggle }) => {
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
-    await new Promise(resolve => setTimeout(resolve, 1200)); // 1.2 second delay
+    await new Promise(resolve => setTimeout(resolve, 1200));
     logout();
     setIsLoggingOut(false);
   };
 
-  // Role-based menu items (updated with System Guide)
+  // Role-based menu items
   const getMenuItems = () => {
+    const systemGuideItem = [
+      { icon: HelpCircle, label: 'System Guide', path: '/system-guide' }
+    ];
+
     const baseItems = [
-      { icon: BarChart3, label: 'Dashboard', path: '/' },
+      { icon: BarChart3, label: 'Dashboard', path: '/dashboard' },
       { icon: Package, label: 'Items', path: '/inventory' },
       { icon: Tags, label: 'Categories', path: '/categories' },
       { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
       { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
-      { icon: HelpCircle, label: 'System Guide', path: '/system-guide' }, // New menu item
     ];
 
     const requestFormsItems = [
@@ -98,46 +99,66 @@ const Sidebar = ({ isOpen, onToggle }) => {
       { icon: CheckCircle, label: 'Approved Forms', path: '/approved-forms' },
     ];
 
-    const adminItems = [
+    const auditLogsItem = [
       { icon: AuditIcon, label: 'Audit Logs', path: '/audit-logs' },
+    ];
+
+    const reportsItem = [
+      { icon: FileText, label: 'Reports', path: '/reports' },
+    ];
+
+    const aiAssistantItem = [
+      { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
+    ];
+
+    const supervisorsItem = [
+      { icon: Users, label: 'Supervisors', path: '/supervisors' } // Correct path
+    ];
+
+    const superAdminOnly = [
+      { icon: Users, label: 'Users', path: '/users' },
       { icon: Settings, label: 'Settings', path: '/settings' },
     ];
 
-    const superAdminItems = [
-      { icon: Users, label: 'Users', path: '/users' },
-      { icon: Users, label: 'Supervisors', path: '/supervisors' },
-    ];
-
     const role = user?.role;
-
-    let menuItems = [...baseItems];
+    let menuItems = [...systemGuideItem]; // Everyone gets System Guide
 
     if (role === 'requester') {
-      // Request Forms + Item Returns
-      menuItems = [...requestFormsItems];
-    } else if (role === 'approver') {
-      // Request Forms + Item Returns + Pending Approvals (no Approved Forms)
-      menuItems = [...requestFormsItems, ...approvalsItems];
-    } else if (role === 'issuer') {
-      // Everything except Users, Pending Approvals, Settings
+      menuItems = [...menuItems, ...requestFormsItems];
+    } 
+    else if (role === 'approver') {
       menuItems = [
+        ...menuItems,
+        ...requestFormsItems,
+        ...approvalsItems,
+        { icon: AlertTriangle, label: 'Low Stock Alerts', path: '/low-stock' },
+        { icon: ArrowUpRight, label: 'Items Out', path: '/items-out' },
+      ];
+    } 
+    else if (role === 'issuer') {
+      menuItems = [
+        ...menuItems,
         ...baseItems,
         ...requestFormsItems,
         ...approvedFormsItem,
-        { icon: FileText, label: 'Reports', path: '/reports' },
-        { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
+        ...reportsItem,
+        ...aiAssistantItem,
+        
+        
       ];
-    } else if (role === 'superadmin') {
-      // Everything
+    } 
+    else if (role === 'superadmin') {
       menuItems = [
+        ...menuItems,
         ...baseItems,
-        ...superAdminItems,
         ...requestFormsItems,
         ...approvalsItems,
         ...approvedFormsItem,
-        ...adminItems,
-        { icon: FileText, label: 'Reports', path: '/reports' },
-        { icon: Bot, label: 'AI Assistant', path: '/ai-assistant' },
+        ...reportsItem,
+        ...aiAssistantItem,
+        ...auditLogsItem,
+        ...supervisorsItem,
+        ...superAdminOnly,
       ];
     }
 
@@ -180,7 +201,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Mobile Overlay */}
       {isOpen && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
@@ -204,7 +225,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
             </div>
           </div>
 
-          {/* User Info - Updated to show full name */}
+          {/* User Info */}
           {user && (
             <div className="px-6 py-3 border-b border-gray-200 bg-gray-50">
               <div className="text-sm font-semibold text-gray-900">{user.full_name || user.username}</div>
@@ -271,7 +292,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
         </div>
       </div>
 
-      {/* Mobile menu button */}
+      {/* Mobile Toggle Button */}
       <button
         onClick={onToggle}
         className="lg:hidden fixed top-4 left-4 z-40 bg-white p-2 rounded-lg shadow-md"
