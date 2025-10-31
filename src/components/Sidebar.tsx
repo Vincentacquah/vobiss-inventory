@@ -286,7 +286,7 @@ const Sidebar = ({ isOpen, onToggle }) => {
           {/* Footer */}
           <div className="px-6 py-4 border-t border-gray-200 mt-auto">
             <div className="text-xs text-gray-500">
-              Version 1.0.0
+              Version 2.1.0
             </div>
           </div>
         </div>

@@ -1,4 +1,4 @@
-// Updated RequestForms.tsx with multi-approver selection
+// RequestForms.tsx – FULL COMPONENT (FIXED: Default = All Approvers Selected)
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Clock, CheckCircle, XCircle, User, Users } from 'lucide-react';
 import { getRequests, getItems, createRequest, getApprovers } from '../api';
@@ -6,9 +6,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox"; // Assuming shadcn/ui has Checkbox; install if needed
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge"; // For displaying selected chips
+import { Badge } from "@/components/ui/badge";
 import { Link } from 'react-router-dom';
 
 interface Request {
@@ -56,9 +56,8 @@ const RequestForms: React.FC = () => {
     loadItems();
     loadApprovers();
 
-    // Check for draft on component mount and auto-open if valid
     const DRAFT_KEY = 'requestFormDraft';
-    const TTL = 5 * 60 * 1000; // 5 minutes in ms
+    const TTL = 5 * 60 * 1000;
     const saved = localStorage.getItem(DRAFT_KEY);
     if (saved) {
       try {
@@ -71,9 +70,8 @@ const RequestForms: React.FC = () => {
             variant: "default"
           });
           setIsFormOpen(true);
-          return;
         } else {
-          localStorage.removeItem(DRAFT_KEY); // Clear expired draft
+          localStorage.removeItem(DRAFT_KEY);
         }
       } catch (error) {
         console.error('Error checking draft:', error);
@@ -155,7 +153,7 @@ const RequestForms: React.FC = () => {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
-    selectedApproverIds: number[]; // Changed to array for multi-select
+    selectedApproverIds: number[];
   }) => {
     try {
       await createRequest({
@@ -169,15 +167,16 @@ const RequestForms: React.FC = () => {
         receivedBy: formData.receivedBy,
         deployment: formData.deployment,
         items: formData.items,
-      }, formData.selectedApproverIds, 'material_request'); // Pass full array and type
+      }, formData.selectedApproverIds, 'material_request');
+
       setIsFormOpen(false);
       toast({
         title: "Success",
-        description: `Material request created and assigned to ${formData.selectedApproverIds.length} approver(s)`,
+        description: `Material request created and sent to ${formData.selectedApproverIds.length} approver(s)`,
         variant: "default"
       });
       loadRequests();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating request:', error);
       toast({
         title: "Error",
@@ -221,7 +220,7 @@ const RequestForms: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Request Forms</h1>
-          <p className="text-gray-600 mt-1">Create and manage material requests with full history</p>
+          <p className="text-gray-600 mt-1">Create and manage material requests — sent to all approvers by default</p>
         </div>
         <div className="mt-4 md:mt-0">
           <Button
@@ -241,10 +240,16 @@ const RequestForms: React.FC = () => {
             <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
             <h2 className="text-2xl font-bold text-gray-900">REQUEST FORM FOR MATERIALS</h2>
           </div>
-          <RequestForm onSave={handleCreateRequest} onCancel={() => setIsFormOpen(false)} items={items} approvers={approvers} />
+          <RequestForm
+            onSave={handleCreateRequest}
+            onCancel={() => setIsFormOpen(false)}
+            items={items}
+            approvers={approvers}
+          />
         </div>
       )}
 
+      {/* Search & Tabs */}
       <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-200 mb-6 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-green-500 to-teal-600"></div>
         <div className="flex flex-col md:flex-row md:items-center space-y-4 md:space-y-0 md:space-x-4">
@@ -308,10 +313,10 @@ const RequestForms: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                         <div className="text-sm text-gray-900">{request.created_by}</div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                      <td class111 className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                         <div className="text-sm font-medium text-gray-900 flex items-center">
                           <User className="h-3 w-3 mr-1 text-gray-500" />
-                          {request.approver_name}
+                          {request.approver_name || 'Multiple'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
@@ -365,7 +370,7 @@ interface RequestFormProps {
     receivedBy: string;
     deployment: 'Deployment' | 'Maintenance';
     items: { name: string; requested: number }[];
-    selectedApproverIds: number[]; // Changed to array
+    selectedApproverIds: number[];
   }) => void;
   onCancel: () => void;
   items: Item[];
@@ -383,12 +388,15 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     receivedBy: '',
     deployment: 'Deployment' as 'Deployment' | 'Maintenance',
   });
-  const [selectedApproverIds, setSelectedApproverIds] = useState<number[]>([]); // New state for multi-select
+  const [selectedApproverIds, setSelectedApproverIds] = useState<number[]>([]);
   const [selectedItems, setSelectedItems] = useState<{ name: string; requested: string }[]>([{ name: '', requested: '' }]);
   const [submitting, setSubmitting] = useState(false);
-  const [showAllApprovers, setShowAllApprovers] = useState(false); // For "select all" toggle
+  const { toast } = useToast();
 
-  // Refs for form inputs
+  const DRAFT_KEY = 'requestFormDraft';
+  const TTL = 5 * 60 * 1000;
+
+  // Refs
   const createdByRef = useRef<HTMLInputElement>(null);
   const teamLeaderNameRef = useRef<HTMLInputElement>(null);
   const teamLeaderPhoneRef = useRef<HTMLInputElement>(null);
@@ -400,24 +408,26 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
   const itemNameRefs = useRef<(HTMLSelectElement | null)[]>([]);
   const itemQtyRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const DRAFT_KEY = 'requestFormDraft';
-  const TTL = 5 * 60 * 1000; // 5 minutes in ms
+  // Auto-select all approvers on mount & when approvers load
+  useEffect(() => {
+    if (approvers.length > 0) {
+      setSelectedApproverIds(approvers.map(a => a.id));
+    }
+  }, [approvers]);
 
-  // Load draft from localStorage on mount
+  // Load draft
   useEffect(() => {
     const saved = localStorage.getItem(DRAFT_KEY);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        const { formData: savedFormData, selectedApproverIds: savedApproverIds, selectedItems: savedItems, showAllApprovers: savedShowAll, timestamp } = parsed;
+        const { formData: savedForm, selectedApproverIds: savedIds, selectedItems: savedItems, timestamp } = parsed;
         if (Date.now() - timestamp < TTL) {
-          setFormData(savedFormData || formData);
-          setSelectedApproverIds(savedApproverIds || []);
+          setFormData(savedForm);
+          setSelectedApproverIds(savedIds || []);
           setSelectedItems(savedItems || [{ name: '', requested: '' }]);
-          setShowAllApprovers(savedShowAll || false);
-          return;
         } else {
-          localStorage.removeItem(DRAFT_KEY); // Clear expired draft
+          localStorage.removeItem(DRAFT_KEY);
         }
       } catch (error) {
         console.error('Error loading draft:', error);
@@ -426,58 +436,42 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     }
   }, []);
 
-  // Save draft to localStorage when relevant states change
+  // Save draft
   useEffect(() => {
-    const draft = {
-      formData,
-      selectedApproverIds,
-      selectedItems,
-      showAllApprovers,
-      timestamp: Date.now(),
-    };
+    const draft = { formData, selectedApproverIds, selectedItems, timestamp: Date.now() };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  }, [formData, selectedApproverIds, selectedItems, showAllApprovers]);
+  }, [formData, selectedApproverIds, selectedItems]);
 
-  // Clear draft after successful submit
-  const clearDraft = () => {
-    localStorage.removeItem(DRAFT_KEY);
-  };
+  const clearDraft = () => localStorage.removeItem(DRAFT_KEY);
 
-  // Handle Enter key navigation
-  const handleKeyDown = (e: React.KeyboardEvent, nextRef: React.RefObject<HTMLInputElement | HTMLSelectElement> | null) => {
+  const handleKeyDown = (e: React.KeyboardEvent, nextRef: any) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (nextRef && nextRef.current) {
-        nextRef.current.focus();
-      }
+      nextRef?.current?.focus();
     }
   };
 
-  // Handle approver selection
-  const handleApproverToggle = (approverId: number, checked: boolean) => {
-    if (checked) {
-      setSelectedApproverIds(prev => [...prev, approverId]);
-    } else {
-      setSelectedApproverIds(prev => prev.filter(id => id !== approverId));
-    }
+  const handleApproverToggle = (id: number, checked: boolean) => {
+    setSelectedApproverIds(prev =>
+      checked ? [...prev, id] : prev.filter(x => x !== id)
+    );
   };
 
   const handleSelectAll = () => {
-    if (showAllApprovers) {
-      setSelectedApproverIds([]); // Deselect all
+    if (selectedApproverIds.length === approvers.length) {
+      setSelectedApproverIds([]);
     } else {
-      setSelectedApproverIds(approvers.map(a => a.id)); // Select all
+      setSelectedApproverIds(approvers.map(a => a.id));
     }
-    setShowAllApprovers(!showAllApprovers);
   };
 
   const handleAddItem = () => {
     setSelectedItems([...selectedItems, { name: '', requested: '' }]);
   };
 
-  const handleItemChange = (index: number, field: string, value: string) => {
+  const handleItemChange = (index: number, field: 'name' | 'requested', value: string) => {
     const newItems = [...selectedItems];
-    newItems[index] = { ...newItems[index], [field]: value };
+    newItems[index][field] = value;
     setSelectedItems(newItems);
   };
 
@@ -492,13 +486,13 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     setSubmitting(true);
 
     if (!formData.createdBy || !formData.teamLeaderName || !formData.projectName || !formData.location || !formData.receivedBy) {
-      alert('Please fill all required fields');
+      toast({ title: "Error", description: "Please fill all required fields", variant: "destructive" });
       setSubmitting(false);
       return;
     }
 
     if (selectedApproverIds.length === 0) {
-      alert('Please select at least one approver');
+      toast({ title: "Error", description: "Please select at least one approver", variant: "destructive" });
       setSubmitting(false);
       return;
     }
@@ -506,200 +500,131 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
     const validItems = selectedItems
       .map(item => ({ name: item.name, requested: parseInt(item.requested) || 0 }))
       .filter(item => item.name && item.requested > 0);
+
     if (validItems.length === 0) {
-      alert('Please add at least one item with quantity');
+      toast({ title: "Error", description: "Please add at least one item", variant: "destructive" });
       setSubmitting(false);
       return;
     }
 
-    onSave({ ...formData, items: validItems, selectedApproverIds });
-    // Reset form after successful save
+    await onSave({ ...formData, items: validItems, selectedApproverIds });
+
+    // Reset
     setFormData({
-      createdBy: '',
-      teamLeaderName: '',
-      teamLeaderPhone: '',
-      projectName: '',
-      ispName: '',
-      location: '',
-      receivedBy: '',
-      deployment: 'Deployment' as 'Deployment' | 'Maintenance',
+      createdBy: '', teamLeaderName: '', teamLeaderPhone: '', projectName: '',
+      ispName: '', location: '', receivedBy: '', deployment: 'Deployment'
     });
-    setSelectedApproverIds([]);
-    setShowAllApprovers(false);
+    setSelectedApproverIds(approvers.map(a => a.id)); // Re-select all
     setSelectedItems([{ name: '', requested: '' }]);
-    clearDraft(); // Clear the draft after successful submission
+    clearDraft();
     setSubmitting(false);
   };
 
+  const allSelected = approvers.length > 0 && selectedApproverIds.length === approvers.length;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6 w-full">
+      {/* Form Fields */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* ... (all your input fields unchanged) */}
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Created By *</label>
-          <Input
-            ref={createdByRef}
-            value={formData.createdBy}
-            onChange={(e) => setFormData({ ...formData, createdBy: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, teamLeaderNameRef)}
-            placeholder="Your full name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={createdByRef} value={formData.createdBy} onChange={e => setFormData({ ...formData, createdBy: e.target.value })} onKeyDown={e => handleKeyDown(e, teamLeaderNameRef)} placeholder="Your full name" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="space-y-3">
-          <label className="block text-sm font-semibold text-gray-700">Team LeaderName *</label>
-          <Input
-            ref={teamLeaderNameRef}
-            value={formData.teamLeaderName}
-            onChange={(e) => setFormData({ ...formData, teamLeaderName: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, teamLeaderPhoneRef)}
-            placeholder="Team leader's full name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <label className="block text-sm font-semibold text-gray-700">Team Leader Name *</label>
+          <Input ref={teamLeaderNameRef} value={formData.teamLeaderName} onChange={e => setFormData({ ...formData, teamLeaderName: e.target.value })} onKeyDown={e => handleKeyDown(e, teamLeaderPhoneRef)} placeholder="Team leader's name" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Team Leader Phone</label>
-          <Input
-            ref={teamLeaderPhoneRef}
-            value={formData.teamLeaderPhone}
-            onChange={(e) => setFormData({ ...formData, teamLeaderPhone: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, projectNameRef)}
-            placeholder="Phone number"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={teamLeaderPhoneRef} value={formData.teamLeaderPhone} onChange={e => setFormData({ ...formData, teamLeaderPhone: e.target.value })} onKeyDown={e => handleKeyDown(e, projectNameRef)} placeholder="Phone number" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Project Name *</label>
-          <Input
-            ref={projectNameRef}
-            value={formData.projectName}
-            onChange={(e) => setFormData({ ...formData, projectName: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, ispNameRef)}
-            placeholder="Project name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={projectNameRef} value={formData.projectName} onChange={e => setFormData({ ...formData, projectName: e.target.value })} onKeyDown={e => handleKeyDown(e, ispNameRef)} placeholder="Project name" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">ISP Name</label>
-          <Input
-            ref={ispNameRef}
-            value={formData.ispName}
-            onChange={(e) => setFormData({ ...formData, ispName: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, locationRef)}
-            placeholder="ISP name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={ispNameRef} value={formData.ispName} onChange={e => setFormData({ ...formData, ispName: e.target.value })} onKeyDown={e => handleKeyDown(e, locationRef)} placeholder="ISP name" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Location of Project *</label>
-          <Input
-            ref={locationRef}
-            value={formData.location}
-            onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, receivedByRef)}
-            placeholder="Project location"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={locationRef} value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} onKeyDown={e => handleKeyDown(e, receivedByRef)} placeholder="Project location" className="rounded-xl" disabled={submitting} />
         </div>
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Received By *</label>
-          <Input
-            ref={receivedByRef}
-            value={formData.receivedBy}
-            onChange={(e) => setFormData({ ...formData, receivedBy: e.target.value })}
-            onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[0] ? { current: deploymentRefs.current[0] } : null)}
-            placeholder="Received by name"
-            className="border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-4 py-3 shadow-sm transition-all duration-200 hover:shadow-md"
-            disabled={submitting}
-          />
+          <Input ref={receivedByRef} value={formData.receivedBy} onChange={e => setFormData({ ...formData, receivedBy: e.target.value })} onKeyDown={e => handleKeyDown(e, deploymentRefs.current[0])} placeholder="Received by name" className="rounded-xl" disabled={submitting} />
         </div>
-        {/* Updated Multi-Approver Selection */}
+
+        {/* APPROVER SELECTION */}
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700 flex items-center">
             <Users className="h-4 w-4 mr-2 text-gray-500" />
-            Assigned Approver(s) * (Select multiple or all)
+            Assigned Approver(s) * (Default: All Selected)
           </label>
-          <div className="border border-gray-300 rounded-xl p-4 shadow-sm bg-gray-50 max-h-48 overflow-y-auto">
+          <div className="border border-gray-300 rounded-xl p-4 shadow-sm bg-gradient-to-b from-blue-50 to-indigo-50 max-h-48 overflow-y-auto">
             <div className="flex items-center space-x-2 mb-3">
-              <Checkbox
-                id="select-all"
-                checked={showAllApprovers}
-                onCheckedChange={handleSelectAll}
-                disabled={submitting}
-              />
-              <label htmlFor="select-all" className="text-sm font-medium text-gray-700 cursor-pointer">
-                Select/Deselect All ({approvers.length})
+              <Checkbox id="select-all" checked={allSelected} onCheckedChange={handleSelectAll} disabled={submitting} />
+              <label htmlFor="select-all" className="text-sm font-medium text-blue-700 cursor-pointer">
+                {allSelected ? 'Deselect All' : 'Select All'} ({approvers.length})
               </label>
             </div>
             <div className="space-y-2">
               {approvers.map((approver) => (
-                <div key={approver.id} className="flex items-center space-x-2">
+                <div key={approver.id, approver.id} className="flex items-center space-x-2">
                   <Checkbox
                     id={`approver-${approver.id}`}
                     checked={selectedApproverIds.includes(approver.id)}
                     onCheckedChange={(checked) => handleApproverToggle(approver.id, !!checked)}
                     disabled={submitting}
                   />
-                  <label htmlFor={`approver-${approver.id}`} className="text-sm text-gray-700 cursor-pointer flex-1">
+                  <label htmlFor={`approver fontes-${approver.id}`} className="text-sm text-gray-700 cursor-pointer flex-1">
                     {approver.fullName}
                   </label>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* Selected Badges */}
           {selectedApproverIds.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
+            <div className="flex flex-wrap gap-2 mt-3">
               {selectedApproverIds.map(id => {
-                const approver = approvers.find(a => a.id === id);
-                return approver ? (
-                  <Badge key={id} variant="secondary" className="text-xs">
-                    {approver.fullName}
+                const a = approvers.find(a => a.id === id);
+                return a ? (
+                  <Badge key={id} variant="secondary" className="text-xs font-medium">
+                    {a.fullName}
                   </Badge>
                 ) : null;
               })}
             </div>
           )}
-          {selectedApproverIds.length === 0 && (
-            <p className="text-sm text-gray-500 mt-1">No approvers selected</p>
-          )}
         </div>
       </div>
+
+      {/* Deployment Type */}
       <div className="space-y-3">
         <label className="block text-sm font-semibold text-gray-700">Type *</label>
         <div className="flex space-x-8 bg-gradient-to-r from-gray-50 to-gray-100 p-4 rounded-xl shadow-sm">
-          <label className="flex items-center cursor-pointer space-x-3 bg-white px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
-            <input
-              ref={(el) => (deploymentRefs.current[0] = el)}
-              type="radio"
-              value="Deployment"
-              checked={formData.deployment === 'Deployment'}
-              onChange={(e) => setFormData({ ...formData, deployment: e.target.value as 'Deployment' | 'Maintenance' })}
-              onKeyDown={(e) => handleKeyDown(e, deploymentRefs.current[1] ? { current: deploymentRefs.current[1] } : itemNameRefs.current[0] ? { current: itemNameRefs.current[0] } : null)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              disabled={submitting}
-            />
-            <span className="text-sm font-medium">Deployment</span>
-          </label>
-          <label className="flex items-center cursor-pointer space-x-3 bg-white px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200">
-            <input
-              ref={(el) => (deploymentRefs.current[1] = el)}
-              type="radio"
-              value="Maintenance"
-              checked={formData.deployment === 'Maintenance'}
-              onChange={(e) => setFormData({ ...formData, deployment: e.target.value as 'Deployment' | 'Maintenance' })}
-              onKeyDown={(e) => handleKeyDown(e, itemNameRefs.current[0] ? { current: itemNameRefs.current[0] } : null)}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              disabled={submitting}
-            />
-            <span className="text-sm font-medium">Maintenance</span>
-          </label>
+          {['Deployment', 'Maintenance'].map((type, i) => (
+            <label key={type} className="flex items-center cursor-pointer space-x-3 bg-white px-4 py-3 rounded-lg shadow-sm hover:shadow-md transition-all">
+              <input
+                ref={el => deploymentRefs.current[i] = el}
+                type="radio"
+                value={type}
+                checked={formData.deployment === type}
+                onChange={e => setFormData({ ...formData, deployment: e.target.value as any })}
+                onKeyDown={e => handleKeyDown(e, i === 0 ? deploymentRefs.current[1] : itemNameRefs.current[0])}
+                className="h-4 w-4 text-blue-600"
+                disabled={submitting}
+              />
+              <span className="text-sm font-medium">{type}</span>
+            </label>
+          ))}
         </div>
       </div>
+
+      {/* Items Table */}
       <div className="space-y-4">
         <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm bg-gradient-to-b from-white to-gray-50">
           <table className="w-full">
@@ -713,51 +638,34 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
             </thead>
             <tbody>
               {selectedItems.map((item, index) => (
-                <tr key={index} className="border-t border-gray-100 hover:bg-white/60 transition-all duration-200">
+                <tr key={index} className="border-t border-gray-100 hover:bg-white/60 transition-all">
                   <td className="border-r border-gray-200 p-4 font-semibold text-sm text-gray-900">{index + 1}</td>
                   <td className="border-r border-gray-200 p-4">
-                    <Select 
-                      value={item.name} 
-                      onValueChange={(value) => handleItemChange(index, 'name', value)} 
-                      disabled={submitting}
-                    >
-                      <SelectTrigger 
-                        ref={(el) => (itemNameRefs.current[index] = el)}
-                        className="w-full border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-3 py-2 shadow-sm transition-all duration-200 hover:shadow-md"
-                        onKeyDown={(e) => handleKeyDown(e, itemQtyRefs.current[index] ? { current: itemQtyRefs.current[index] } : null)}
-                      >
+                    <Select value={item.name} onValueChange={v => handleItemChange(index, 'name', v)} disabled={submitting}>
+                      <SelectTrigger ref={el => itemNameRefs.current[index] = el} className="rounded-xl" onKeyDown={e => handleKeyDown(e, itemQtyRefs.current[index])}>
                         <SelectValue placeholder="Select Item" />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl shadow-lg border-gray-200">
-                        {items.map((itemOption) => (
-                          <SelectItem key={itemOption.id} value={itemOption.name} className="px-4 py-2 hover:bg-blue-50">
-                            {itemOption.name}
-                          </SelectItem>
+                      <SelectContent>
+                        {items.map(item => (
+                          <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </td>
                   <td className="border-r border-gray-200 p-4">
                     <Input
-                      ref={(el) => (itemQtyRefs.current[index] = el)}
+                      ref={el => itemQtyRefs.current[index] = el}
                       type="number"
                       value={item.requested}
-                      onChange={(e) => handleItemChange(index, 'requested', e.target.value)}
-                      onKeyDown={(e) => handleKeyDown(e, index === selectedItems.length - 1 ? null : itemNameRefs.current[index + 1] ? { current: itemNameRefs.current[index + 1] } : null)}
-                      className="text-sm w-20 border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 rounded-xl px-3 py-2 shadow-sm transition-all duration-200 hover:shadow-md"
+                      onChange={e => handleItemChange(index, 'requested', e.target.value)}
+                      onKeyDown={e => handleKeyDown(e, index === selectedItems.length - 1 ? null : itemNameRefs.current[index + 1])}
+                      className="w-20 rounded-xl"
                       min="0"
                       disabled={submitting}
                     />
                   </td>
                   <td className="p-4">
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => removeItemRow(index)}
-                      disabled={submitting || selectedItems.length <= 1}
-                      className="text-xs rounded-lg"
-                    >
+                    <Button type="button" variant="destructive" size="sm" onClick={() => removeItemRow(index)} disabled={submitting || selectedItems.length <= 1}>
                       Remove
                     </Button>
                   </td>
@@ -766,32 +674,17 @@ const RequestForm: React.FC<RequestFormProps> = ({ onSave, onCancel, items, appr
             </tbody>
           </table>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleAddItem}
-          className="w-full border-gray-300 hover:bg-blue-50 rounded-xl shadow-sm transition-all duration-200 hover:shadow-md"
-          disabled={submitting}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Row
+        <Button type="button" variant="outline" onClick={handleAddItem} className="w-full rounded-xl" disabled={submitting}>
+          <Plus className="h-4 w-4 mr-2" /> Add Row
         </Button>
       </div>
-      <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 pt-6">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onCancel}
-          disabled={submitting}
-          className="border-gray-300 hover:bg-gray-50 rounded-xl shadow-sm transition-all duration-200 hover:shadow-md"
-        >
+
+      {/* Submit */}
+      <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+        <Button type="button" variant="outline" onClick={onCancel} disabled={submitting} className="rounded-xl">
           Cancel
         </Button>
-        <Button 
-          type="submit" 
-          disabled={submitting}
-          className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg rounded-xl transition-all duration-200 hover:shadow-xl"
-        >
+        <Button type="submit" disabled={submitting} className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-lg">
           {submitting ? 'Submitting...' : 'Submit Request'}
         </Button>
       </div>

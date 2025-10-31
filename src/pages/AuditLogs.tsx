@@ -135,7 +135,7 @@ const AuditLogs = () => {
         const logTime = new Date(ts).getTime();
         if (logTime >= startMs && logTime < endMs) {
           stats.totalToday++;
-          const userKey = log.full_name || log.username || 'Anonymous';
+          const userKey = log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous');
           stats.usersToday[userKey] = (stats.usersToday[userKey] || 0) + 1;
         }
       } catch (e) {
@@ -159,7 +159,7 @@ const AuditLogs = () => {
       }
       return {
         'Date & Time': `${formatDate(log.timestamp)} ${formatTime(log.timestamp)}`,
-        User: log.full_name || log.username || 'Anonymous',
+        User: log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous'),
         Action: log.action.replace(/_/g, ' '),
         'IP Address': `${log.ip_address}${geo}`,
         Details: log.details ? (typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details) : 'No details',
@@ -214,24 +214,30 @@ const AuditLogs = () => {
           return `Finalized ${getRequestTypeLabel(parsedDetails.type)} ID: ${parsedDetails.request_id || 'N/A'} released by: ${parsedDetails.released_by || 'Unknown'}`;
         case 'create_user':
           return `Created user: ${parsedDetails.username || 'N/A'} (${parsedDetails.role || 'N/A'})`;
+        case 'delete_user':
+          return `Deleted user: ${parsedDetails.username || parsedDetails.user_id || 'N/A'}`;
         case 'reset_password':
-          return `Reset password for user ID: ${parsedDetails.user_id || 'N/A'}`;
+          return `Reset password for user: ${parsedDetails.username || parsedDetails.user_id || 'N/A'}`;
         case 'update_user_role':
-          return `Updated role for user ID: ${parsedDetails.user_id || 'N/A'} to: ${parsedDetails.new_role || 'N/A'}`;
+          return `Updated role for user: ${parsedDetails.username || parsedDetails.user_id || 'N/A'} from: ${parsedDetails.old_role || 'N/A'} to: ${parsedDetails.new_role || 'N/A'}`;
         case 'create_item':
           return `Created item: ${parsedDetails.item_name || 'N/A'}`;
         case 'update_item':
-          return `Updated item ID: ${parsedDetails.item_id || 'N/A'} - reason: ${parsedDetails.reason || 'N/A'}`;
+          let updateStr = `Updated item: ${parsedDetails.item_name || parsedDetails.item_id || 'N/A'} - reason: ${parsedDetails.reason || 'N/A'}`;
+          if (parsedDetails.old_quantity !== undefined && parsedDetails.new_quantity !== undefined) {
+            updateStr += ` (Quantity changed from ${parsedDetails.old_quantity} to ${parsedDetails.new_quantity})`;
+          }
+          return updateStr;
         case 'delete_item':
-          return `Deleted item ID: ${parsedDetails.item_id || 'N/A'}`;
+          return `Deleted item: ${parsedDetails.item_name || parsedDetails.item_id || 'N/A'}`;
         case 'issue_item':
-          return `Issued ${parsedDetails.quantity || 'N/A'} of item ID: ${parsedDetails.item_id || 'N/A'} to: ${parsedDetails.person_name || 'N/A'}`;
+          return `Issued ${parsedDetails.quantity || 'N/A'} of item: ${parsedDetails.item_name || parsedDetails.item_id || 'N/A'} to: ${parsedDetails.person_name || 'N/A'}`;
         case 'create_category':
           return `Created category: ${parsedDetails.category_name || 'N/A'}`;
         case 'update_category':
-          return `Updated category ID: ${parsedDetails.category_id || 'N/A'}`;
+          return `Updated category: ${parsedDetails.category_name || parsedDetails.category_id || 'N/A'}`;
         case 'delete_category':
-          return `Deleted category ID: ${parsedDetails.category_id || 'N/A'}`;
+          return `Deleted category: ${parsedDetails.category_name || parsedDetails.category_id || 'N/A'}`;
         default:
           return (
             <pre className="bg-gray-50 p-3 rounded-md text-xs overflow-auto max-h-20">
@@ -280,14 +286,14 @@ const AuditLogs = () => {
     if (searchTerm) {
       filtered = filtered.filter(log =>
         log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (log.full_name || log.username || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (log.full_name || log.username || log.user_id?.toString() || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         log.ip_address.includes(searchTerm)
       );
     }
 
     // User filter
     if (selectedUser !== 'All') {
-      filtered = filtered.filter(log => (log.full_name || log.username) === selectedUser);
+      filtered = filtered.filter(log => (log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous')) === selectedUser);
     }
 
     // Sort
@@ -346,7 +352,7 @@ const AuditLogs = () => {
   }
 
   // Get unique users for filter
-  const uniqueUsers = [...new Set(logs.map(log => log.full_name || log.username || 'Anonymous'))];
+  const uniqueUsers = [...new Set(logs.map(log => log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous')))];
 
   return (
     <div className="p-6">
@@ -508,7 +514,7 @@ const AuditLogs = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {Object.entries(loginStats.usersToday).map(([user, count]) => {
                 const lastLogin = logs
-                  .filter(log => (log.full_name || log.username) === user && log.action === 'login')
+                  .filter(log => (log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous')) === user && log.action === 'login')
                   .sort((a, b) => parseTimestamp(b.timestamp).getTime() - parseTimestamp(a.timestamp).getTime())[0];
                 return (
                   <tr key={user} className="hover:bg-gray-50">
@@ -569,7 +575,7 @@ const AuditLogs = () => {
                     ipSuffix = ' (Localhost)';
                   }
                 }
-                const userDisplay = log.full_name || log.username || 'Anonymous';
+                const userDisplay = log.full_name || log.username || (log.user_id ? `Deleted User (${log.user_id})` : 'Anonymous');
                 return (
                   <tr key={log.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
@@ -577,7 +583,7 @@ const AuditLogs = () => {
                       <div className="text-sm text-gray-500">{formatTime(log.timestamp)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className={`text-sm font-medium ${userDisplay === 'Anonymous' ? 'text-gray-500 italic' : 'text-gray-900'}`}>
+                      <div className={`text-sm font-medium ${userDisplay.includes('Deleted User') || userDisplay === 'Anonymous' ? 'text-gray-500 italic' : 'text-gray-900'}`}>
                         {userDisplay}
                       </div>
                     </td>

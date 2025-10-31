@@ -79,14 +79,14 @@ interface Request {
   deployment_type: 'Deployment' | 'Maintenance';
   release_by: string | null;
   received_by: string | null;
-  type: 'material_request' | 'item_return'; // Added type
-  reason?: string; // Added reason
+  type: 'material_request' | 'item_return';
+  reason?: string;
   status: 'pending' | 'approved' | 'completed' | 'rejected';
   created_at: string;
   updated_at: string;
   item_count: number;
-  reject_reason?: string | null; // Added for quick access in lists
-  approver_names?: string; // Updated to comma-separated for multi-approvers
+  reject_reason?: string | null;
+  approver_names?: string;
 }
 
 interface RequestDetails extends Request {
@@ -107,14 +107,14 @@ interface RequestDetails extends Request {
     signature: string;
     approved_at: string;
   }[];
-  rejections?: { // Added for rejection details
+  rejections?: {
     id: number;
     request_id: number;
     rejector_name: string;
     reason: string;
     created_at: string;
   }[];
-  approvers?: { // New: array of approvers for details view
+  approvers?: {
     id: number;
     fullName: string;
     username: string;
@@ -210,7 +210,6 @@ export const logoutUser = async (): Promise<void> => {
     });
   } catch (error) {
     console.error('Error logging out:', error);
-    // Don't throw; logout should still clear local state
   }
 };
 
@@ -419,7 +418,7 @@ export const addItem = async (formData: FormData): Promise<Item> => {
   try {
     const response = await apiFetch(`${API_URL}/items`, {
       method: 'POST',
-      headers: getAuthHeader(), // No Content-Type for FormData
+      headers: getAuthHeader(),
       body: formData,
     });
     const text = await response.text();
@@ -437,7 +436,7 @@ export const updateItem = async (itemId: number, formData: FormData): Promise<It
   try {
     const response = await apiFetch(`${API_URL}/items/${itemId}`, {
       method: 'PUT',
-      headers: getAuthHeader(), // No Content-Type for FormData
+      headers: getAuthHeader(),
       body: formData,
     });
     const text = await response.text();
@@ -605,32 +604,37 @@ export const getDashboardStats = async (): Promise<{
   }
 };
 
-// Requests
-export const createRequest = async (requestData: {
-  createdBy: string;
-  teamLeaderName?: string; // Optional for returns
-  teamLeaderPhone?: string; // Optional for returns
-  projectName: string;
-  ispName?: string | null; // Optional for returns
-  location: string;
-  deployment?: 'Deployment' | 'Maintenance'; // Optional for returns
-  releaseBy?: string | null; // Optional for returns
-  receivedBy?: string | null; // Optional for returns
-  reason?: string; // Optional for requests, required for returns
-  items: { name: string; requested: number }[];
-}, selectedApproverIds: number[], type: 'material_request' | 'item_return' = 'material_request'): Promise<Request> => {
-  // Client-side validation to prevent unnecessary server call
-  if (selectedApproverIds.length === 0) {
-    throw new Error('At least one approver must be selected.');
+// REQUESTS – FIXED: selectedApproverIds optional, null = all approvers
+export const createRequest = async (
+  requestData: {
+    createdBy: string;
+    teamLeaderName?: string;
+    teamLeaderPhone?: string;
+    projectName: string;
+    ispName?: string | null;
+    location: string;
+    deployment?: 'Deployment' | 'Maintenance';
+    releaseBy?: string | null;
+    receivedBy?: string | null;
+    reason?: string;
+    items: { name: string; requested: number }[];
+  },
+  selectedApproverIds?: number[] | null,
+  type: 'material_request' | 'item_return' = 'material_request'
+): Promise<Request> => {
+  const payload: any = { ...requestData, type };
+
+  // Only send selectedApproverIds if it's a non-empty array
+  if (selectedApproverIds && Array.isArray(selectedApproverIds) && selectedApproverIds.length > 0) {
+    payload.selectedApproverIds = selectedApproverIds;
   }
+  // If null or empty → backend assigns ALL approvers
 
   try {
     const response = await apiFetch(`${API_URL}/requests`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ...requestData, selectedApproverIds, type }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
     return await response.json();
   } catch (error) {
@@ -732,10 +736,7 @@ export const finalizeRequest = async (id: string | number, items: { itemId: numb
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ 
-        items, 
-        releasedBy
-      }),
+      body: JSON.stringify({ items, releasedBy }),
     });
     return await response.json();
   } catch (error) {

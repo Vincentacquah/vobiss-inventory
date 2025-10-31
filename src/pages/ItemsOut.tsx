@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ArrowUpRight, Calendar, Download, Filter, CheckCircle, XCircle } from 'lucide-react';
+import { Search, ArrowUpRight, Calendar, Download, Filter, CheckCircle, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { getRequests, getRequestDetails } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -48,7 +48,11 @@ const ItemsOut: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [filterDate, setFilterDate] = useState<string>('all');
+  const [returnFilter, setReturnFilter] = useState<'all' | 'with' | 'without'>('all');
   const [activeTab, setActiveTab] = useState<'completed' | 'rejected'>('completed');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const itemsPerPage = 10;
   const { toast } = useToast();
 
   useEffect(() => {
@@ -57,7 +61,11 @@ const ItemsOut: React.FC = () => {
 
   useEffect(() => {
     filterRequests();
-  }, [allRequests, searchTerm, filterDate, activeTab]);
+  }, [allRequests, searchTerm, filterDate, returnFilter, activeTab]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchTerm, filterDate, returnFilter]);
 
   const loadRequests = async () => {
     try {
@@ -91,6 +99,13 @@ const ItemsOut: React.FC = () => {
   const filterRequests = () => {
     let filtered = allRequests.filter((request: Request) => request.status === activeTab);
 
+    if (activeTab === 'completed' && returnFilter !== 'all') {
+      const hasReturns = (items: Request['details']['items']) => items.some(item => (item.quantity_returned || 0) > 0);
+      filtered = filtered.filter((request: Request) => 
+        returnFilter === 'with' ? hasReturns(request.details?.items || []) : !hasReturns(request.details?.items || [])
+      );
+    }
+
     if (searchTerm.trim()) {
       filtered = filtered.filter((request: Request) =>
         (request.team_leader_name && request.team_leader_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -117,9 +132,19 @@ const ItemsOut: React.FC = () => {
     setFilteredRequests(filtered);
   };
 
+  const toggleExpand = (id: number) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
+  };
+
   const exportToCSV = async () => {
     try {
-      const headers = ["Request ID", "Project Name", "Created By", "Team Leader", "Project Type", "Item", "Quantity Requested", "Quantity Received", "Approved By", "Date Finalized"];
+      const headers = ["Request ID", "Project Name", "Created By", "Team Leader", "Project Type", "Item", "Quantity Requested", "Quantity Received", "Quantity Returned", "Approved By", "Date Finalized"];
       const rows = [];
       
       for (const request of filteredRequests as Request[]) {
@@ -134,6 +159,7 @@ const ItemsOut: React.FC = () => {
             item.item_name,
             item.quantity_requested || 0,
             item.quantity_received || 0,
+            item.quantity_returned || 0,
             approvedBy,
             new Date(request.updated_at).toLocaleString()
           ]);
@@ -180,6 +206,10 @@ const ItemsOut: React.FC = () => {
     }
   };
 
+  const calculateTotalReturned = (items: Request['details']['items']) => {
+    return items.reduce((sum, item) => sum + (item.quantity_returned || 0), 0);
+  };
+
   if (loading) {
     return (
       <div className="text-center py-12">
@@ -188,6 +218,11 @@ const ItemsOut: React.FC = () => {
       </div>
     );
   }
+
+  const indexOfLast = currentPage * itemsPerPage;
+  const indexOfFirst = indexOfLast - itemsPerPage;
+  const currentRequests = filteredRequests.slice(indexOfFirst, indexOfLast);
+  const totalPages = Math.ceil(filteredRequests.length / itemsPerPage);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -234,6 +269,21 @@ const ItemsOut: React.FC = () => {
               <option value="90">Last 90 Days</option>
             </select>
           </div>
+
+          {activeTab === 'completed' && (
+            <div className="flex items-center space-x-2">
+              <Filter className="h-5 w-5 text-gray-500" />
+              <select
+                value={returnFilter}
+                onChange={(e) => setReturnFilter(e.target.value as 'all' | 'with' | 'without')}
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="all">All Completed</option>
+                <option value="with">With Returns</option>
+                <option value="without">Without Returns</option>
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -254,6 +304,7 @@ const ItemsOut: React.FC = () => {
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project Type</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Returned</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Approved By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Finalized</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
@@ -261,63 +312,104 @@ const ItemsOut: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {(filteredRequests as Request[]).map((request) => {
+                  {currentRequests.map((request) => {
                     if (!request.details) {
                       return (
                         <tr key={request.id} className="hover:bg-gray-50 transition-colors">
-                          <td colSpan={10} className="px-6 py-4 text-center text-gray-500">
+                          <td colSpan={11} className="px-6 py-4 text-center text-gray-500">
                             Loading details...
                           </td>
                         </tr>
                       );
                     }
                     const approvedBy = request.details.approvals[0]?.approver_name || 'N/A';
+                    const totalReturned = calculateTotalReturned(request.details.items);
+                    const isExpanded = expandedRows.has(request.id);
                     return (
-                      <tr key={request.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:underline font-medium">
-                            {request.id}
-                          </Link>
-                        </td>
-                        <td className="px-6 py-4 border-r border-gray-200">
-                          <div className="text-sm font-medium text-gray-900">{request.project_name}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm font-medium text-gray-900">{request.team_leader_name}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm text-gray-900">{request.created_by}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm font-medium text-gray-900 capitalize">{request.deployment_type}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm text-gray-900">{approvedBy}</div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="flex items-center text-sm text-gray-900">
-                            <Calendar className="h-4 w-4 text-gray-400 mr-2" />
-                            {new Date(request.updated_at).toLocaleDateString()}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {new Date(request.updated_at).toLocaleTimeString()}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
-                            {statusIcon(request.status)}
-                            {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:text-blue-500 font-medium">
-                            View Details
-                          </Link>
-                        </td>
-                      </tr>
+                      <React.Fragment key={request.id}>
+                        <tr 
+                          className="hover:bg-gray-50 transition-colors cursor-pointer"
+                          onClick={() => toggleExpand(request.id)}
+                        >
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="flex items-center">
+                              {isExpanded ? <ChevronUp className="h-4 w-4 mr-2" /> : <ChevronDown className="h-4 w-4 mr-2" />}
+                              <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:underline font-medium">
+                                {request.id}
+                              </Link>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 border-r border-gray-200">
+                            <div className="text-sm font-medium text-gray-900">{request.project_name}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm font-medium text-gray-900">{request.team_leader_name}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm text-gray-900">{request.created_by}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm font-medium text-gray-900 capitalize">{request.deployment_type}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm font-medium text-gray-900">{totalReturned}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="text-sm text-gray-900">{approvedBy}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <div className="flex items-center text-sm text-gray-900">
+                              <Calendar className="h-4 w-4 text-gray-400 mr-2" />
+                              {new Date(request.updated_at).toLocaleDateString()}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              {new Date(request.updated_at).toLocaleTimeString()}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
+                              {statusIcon(request.status)}
+                              {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:text-blue-500 font-medium">
+                              View Details
+                            </Link>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={11} className="p-0">
+                              <div className="bg-gray-50 p-4">
+                                <table className="min-w-full divide-y divide-gray-200">
+                                  <thead>
+                                    <tr>
+                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Name</th>
+                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity Requested</th>
+                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity Received</th>
+                                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quantity Returned</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="bg-white divide-y divide-gray-200">
+                                    {request.details.items.map((item) => (
+                                      <tr key={item.id}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.item_name}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.quantity_requested || 0}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.quantity_received || 0}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.quantity_returned || 0}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -328,6 +420,42 @@ const ItemsOut: React.FC = () => {
               <div className="text-center py-12">
                 <ArrowUpRight className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-600">No {activeTab} issuances yet</p>
+              </div>
+            )}
+
+            {filteredRequests.length > 0 && (
+              <div className="flex justify-between items-center mt-4 px-6 pb-4 border-t border-gray-200">
+                <Button 
+                  onClick={() => setCurrentPage(1)} 
+                  disabled={currentPage === 1}
+                  variant="outline"
+                >
+                  First
+                </Button>
+                <Button 
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} 
+                  disabled={currentPage === 1}
+                  variant="outline"
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-gray-700">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button 
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} 
+                  disabled={currentPage === totalPages}
+                  variant="outline"
+                >
+                  Next
+                </Button>
+                <Button 
+                  onClick={() => setCurrentPage(totalPages)} 
+                  disabled={currentPage === totalPages}
+                  variant="outline"
+                >
+                  Last
+                </Button>
               </div>
             )}
           </div>

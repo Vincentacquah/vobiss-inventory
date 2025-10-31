@@ -306,6 +306,9 @@ export async function initDB() {
       );
     `, 'items');
 
+    // Add deleted_at column to items
+    await addColumnIfNotExists('items', 'deleted_at', 'TIMESTAMP');
+
     // Migrate vendor_id if needed
     try {
       await addColumnIfNotExists('items', 'vendor_id', 'INTEGER REFERENCES vendors(id)');
@@ -569,7 +572,7 @@ export async function resetUserPassword(userId, currentUserId, ip) {
     );
 
     // Log audit
-    await insertAuditLog(client, currentUserId, 'reset_password', ip, { user_id: userId });
+    await insertAuditLog(client, currentUserId, 'reset_password', ip, { user_id: userId, username });
 
     // Send reset email
     const { sendResetPassword } = await import('./emailService.js');
@@ -590,6 +593,10 @@ export async function updateUserRole(userId, role, currentUserId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const current = await client.query('SELECT role AS old_role, username FROM users WHERE id = $1', [userId]);
+    if (current.rowCount === 0) throw new Error('User not found');
+    const old_role = current.rows[0].old_role;
+    const username = current.rows[0].username;
     const result = await client.query(
       'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
       [role, userId]
@@ -597,7 +604,7 @@ export async function updateUserRole(userId, role, currentUserId, ip) {
     if (result.rowCount === 0) throw new Error('User not found');
 
     // Log audit
-    await insertAuditLog(client, currentUserId, 'update_user_role', ip, { user_id: userId, new_role: role });
+    await insertAuditLog(client, currentUserId, 'update_user_role', ip, { user_id: userId, username, old_role, new_role: role });
 
     await client.query('COMMIT');
     return result.rows[0];
@@ -633,6 +640,14 @@ export async function updateUser(userId, updates, currentUserId, ip) {
       }
     }
     
+    const current = await client.query(
+      'SELECT first_name AS old_first_name, last_name AS old_last_name, email AS old_email, role AS old_role, username FROM users WHERE id = $1',
+      [userId]
+    );
+    if (current.rowCount === 0) throw new Error('User not found');
+    const old_values = current.rows[0];
+    delete old_values.username; // No need to include username in old_values
+    
     const result = await client.query(
       'UPDATE users SET first_name = $1, last_name = $2, email = $3, role = $4 WHERE id = $5 RETURNING *',
       [first_name?.trim(), last_name?.trim(), email?.trim().toLowerCase(), role, userId]
@@ -641,7 +656,7 @@ export async function updateUser(userId, updates, currentUserId, ip) {
     if (result.rowCount === 0) throw new Error('User not found');
     
     // Log audit
-    await insertAuditLog(client, currentUserId, 'update_user', ip, { user_id: userId, changes: { first_name, last_name, email, role } });
+    await insertAuditLog(client, currentUserId, 'update_user', ip, { user_id: userId, username: old_values.username, old_values, new_values: { first_name, last_name, email, role } });
     
     await client.query('COMMIT');
     return result.rows[0];
@@ -665,14 +680,14 @@ export async function deleteUser(userId, currentUserId, ip) {
       throw new Error('Cannot delete your own account');
     }
     
-    const userResult = await client.query('SELECT first_name, last_name, email FROM users WHERE id = $1', [userId]);
+    const userResult = await client.query('SELECT first_name, last_name, username, email FROM users WHERE id = $1', [userId]);
     if (userResult.rowCount === 0) throw new Error('User not found');
     const deletedUser = userResult.rows[0];
     
     await client.query('DELETE FROM users WHERE id = $1', [userId]);
     
     // Log audit
-    await insertAuditLog(client, currentUserId, 'delete_user', ip, { user_id: userId, deleted_user: deletedUser });
+    await insertAuditLog(client, currentUserId, 'delete_user', ip, { user_id: userId, deleted_user });
     
     await client.query('COMMIT');
     return { message: 'User deleted successfully' };
@@ -801,7 +816,7 @@ export async function getAuditLogs() {
 export async function getCategories() {
   try {
     const categoriesResult = await pool.query('SELECT * FROM categories ORDER BY created_at DESC');
-    const itemsResult = await pool.query('SELECT category_id, COUNT(*) as count FROM items WHERE category_id IS NOT NULL GROUP BY category_id');
+    const itemsResult = await pool.query('SELECT category_id, COUNT(*) as count FROM items WHERE category_id IS NOT NULL AND deleted_at IS NULL GROUP BY category_id');
     const categoryCounts = {};
     itemsResult.rows.forEach(item => {
       categoryCounts[item.category_id] = parseInt(item.count, 10);
@@ -854,7 +869,7 @@ export async function updateCategory(categoryId, categoryData, userId, ip) {
     if (result.rowCount === 0) throw new Error('Category not found');
 
     // Log audit
-    await insertAuditLog(client, userId, 'update_category', ip, { category_id: categoryId });
+    await insertAuditLog(client, userId, 'update_category', ip, { category_id: categoryId, category_name: current.rows[0].name });
 
     await client.query('COMMIT');
     return result.rows[0];
@@ -897,6 +912,7 @@ export async function getItems() {
       FROM items i
       LEFT JOIN categories c ON i.category_id = c.id
       LEFT JOIN vendors v ON i.vendor_id = v.id
+      WHERE i.deleted_at IS NULL
       ORDER BY i.created_at DESC
     `);
     return result.rows;
@@ -929,7 +945,7 @@ export async function addItem(itemData, userId, ip) {
     }
 
     const result = await client.query(
-      'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL) RETURNING *',
+      'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL, NULL) RETURNING *',
       [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
     );
 
@@ -956,10 +972,11 @@ export async function updateItem(itemId, itemData, userId, ip) {
     await client.query('BEGIN');
     
     // Fetch previous quantity and threshold
-    const currentResult = await client.query('SELECT quantity, low_stock_threshold FROM items WHERE id = $1', [itemId]);
-    if (currentResult.rowCount === 0) throw new Error('Item not found');
+    const currentResult = await client.query('SELECT quantity, low_stock_threshold, name AS item_name FROM items WHERE id = $1 AND deleted_at IS NULL FOR UPDATE', [itemId]);
+    if (currentResult.rowCount === 0) throw new Error('Item not found or deleted');
     prevQuantity = parseInt(currentResult.rows[0].quantity, 10);
     threshold = currentResult.rows[0].low_stock_threshold || 5;
+    const item_name = currentResult.rows[0].item_name;
 
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, update_reason, receipt_images: providedReceiptImages } = itemData;
     
@@ -1029,13 +1046,20 @@ export async function updateItem(itemId, itemData, userId, ip) {
     }
 
     const result = await client.query(
-      'UPDATE items SET name = $1, description = $2, category_id = $3, vendor_id = $4, quantity = $5, low_stock_threshold = COALESCE($6, low_stock_threshold), vendor_name = $7, unit_price = $8, receipt_images = $9, update_reasons = $10, updated_at = CURRENT_TIMESTAMP WHERE id = $11 RETURNING *',
+      'UPDATE items SET name = $1, description = $2, category_id = $3, vendor_id = $4, quantity = $5, low_stock_threshold = COALESCE($6, low_stock_threshold), vendor_name = $7, unit_price = $8, receipt_images = $9, update_reasons = $10, updated_at = CURRENT_TIMESTAMP WHERE id = $11 AND deleted_at IS NULL RETURNING *',
       [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, JSON.stringify(newReceiptImagesArray), newReasons, itemId]
     );
-    if (result.rowCount === 0) throw new Error('Item not found');
+    if (result.rowCount === 0) throw new Error('Item not found or deleted');
+
+    // Prepare audit details
+    let auditDetails = { item_id: itemId, item_name, reason: update_reason };
+    if (parsedQuantity !== prevQuantity) {
+      auditDetails.old_quantity = prevQuantity;
+      auditDetails.new_quantity = parsedQuantity;
+    }
 
     // Log audit
-    await insertAuditLog(client, userId, 'update_item', ip, { item_id: itemId, reason: update_reason });
+    await insertAuditLog(client, userId, 'update_item', ip, auditDetails);
 
     await client.query('COMMIT');
 
@@ -1063,32 +1087,14 @@ export async function deleteItem(itemId, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Delete associated receipt images
-    const itemResult = await client.query('SELECT receipt_images, name FROM items WHERE id = $1', [itemId]);
-    if (itemResult.rowCount > 0) {
-      let receiptImages = [];
-      const receiptImagesValue = itemResult.rows[0].receipt_images;
-      if (receiptImagesValue && typeof receiptImagesValue === 'string' && receiptImagesValue.trim() !== '') {
-        try {
-          receiptImages = JSON.parse(receiptImagesValue);
-        } catch (parseError) {
-          console.warn('Failed to parse receipt_images for deletion, skipping:', parseError.message);
-        }
-      }
-      receiptImages.forEach((imgObj) => {
-        const imgPath = imgObj.path;
-        try {
-          fs.unlinkSync(`.${imgPath}`);
-        } catch (unlinkError) {
-          console.warn('Could not delete receipt image:', unlinkError);
-        }
-      });
-    }
+    const itemResult = await client.query('SELECT name FROM items WHERE id = $1 AND deleted_at IS NULL', [itemId]);
+    if (itemResult.rowCount === 0) throw new Error('Item not found or already deleted');
+    const item_name = itemResult.rows[0].name;
+    const result = await client.query('UPDATE items SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *', [itemId]);
+    if (result.rowCount === 0) throw new Error('Item not found or already deleted');
     
-    await client.query('DELETE FROM items WHERE id = $1 RETURNING *', [itemId]);
-
     // Log audit
-    await insertAuditLog(client, userId, 'delete_item', ip, { item_id: itemId, item_name: itemResult.rows[0]?.name });
+    await insertAuditLog(client, userId, 'delete_item', ip, { item_id: itemId, item_name });
 
     await client.query('COMMIT');
     return { message: 'Item deleted' };
@@ -1143,10 +1149,10 @@ export async function issueItem(issueData, userId, ip) {
       throw new Error('Quantity must be positive');
     }
     const itemCheck = await client.query(
-      'SELECT quantity, low_stock_threshold, name FROM items WHERE id = $1 FOR UPDATE',
+      'SELECT quantity, low_stock_threshold, name FROM items WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
       [itemId]
     );
-    if (itemCheck.rowCount === 0) throw new Error('Item not found');
+    if (itemCheck.rowCount === 0) throw new Error('Item not found or deleted');
     prevQuantity = parseInt(itemCheck.rows[0].quantity, 10);
     threshold = itemCheck.rows[0].low_stock_threshold || 5;
     const availableQuantity = prevQuantity;
@@ -1190,7 +1196,7 @@ export async function getLowStockItems() {
       FROM items i
       LEFT JOIN categories c ON i.category_id = c.id
       LEFT JOIN vendors v ON i.vendor_id = v.id
-      WHERE i.quantity <= COALESCE(i.low_stock_threshold, 5)
+      WHERE i.quantity <= COALESCE(i.low_stock_threshold, 5) AND i.deleted_at IS NULL
       ORDER BY i.created_at DESC
     `);
     return result.rows;
@@ -1203,10 +1209,10 @@ export async function getLowStockItems() {
 export async function getDashboardStats() {
   try {
     const [itemsResult, categoriesResult, itemsOutResult, lowStockResult, requestsResult] = await Promise.all([
-      pool.query('SELECT COUNT(*) AS count FROM items'),
+      pool.query('SELECT COUNT(*) AS count FROM items WHERE deleted_at IS NULL'),
       pool.query('SELECT COUNT(*) AS count FROM categories'),
       pool.query('SELECT COUNT(*) AS count FROM items_out'),
-      pool.query('SELECT COUNT(*) AS count FROM items WHERE quantity <= COALESCE(low_stock_threshold, 5)'),
+      pool.query('SELECT COUNT(*) AS count FROM items WHERE quantity <= COALESCE(low_stock_threshold, 5) AND deleted_at IS NULL'),
       pool.query('SELECT COUNT(*) AS count FROM requests WHERE status = $1', ['pending']),
     ]);
     return {
@@ -1255,7 +1261,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
     }
 
     for (const item of items) {
-      const selectedItem = await client.query('SELECT id FROM items WHERE name = $1', [item.name]);
+      const selectedItem = await client.query('SELECT id FROM items WHERE name = $1 AND deleted_at IS NULL', [item.name]);
       if (selectedItem.rowCount === 0) throw new Error(`Item not found: ${item.name}`);
       const quantityRequested = parseInt(item.requested) || 0;
       await client.query(
@@ -1327,7 +1333,7 @@ export async function updateRequest(requestId, requestData, userId, ip) {
     // Delete old items and re-insert (simple approach; adjust if needed)
     await client.query('DELETE FROM request_items WHERE request_id = $1', [requestId]);
     for (const item of items) {
-      const selectedItem = await client.query('SELECT id FROM items WHERE name = $1', [item.name]);
+      const selectedItem = await client.query('SELECT id FROM items WHERE name = $1 AND deleted_at IS NULL', [item.name]);
       if (selectedItem.rowCount === 0) throw new Error(`Item not found: ${item.name}`);
       await client.query(
         'INSERT INTO request_items (request_id, item_id, quantity_requested, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
