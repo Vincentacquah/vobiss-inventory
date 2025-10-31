@@ -1,4 +1,4 @@
-// AuthContext.tsx (final version with 5-minute warning + background logout)
+// AuthContext.tsx (FINAL: Warning modal stays until button clicked)
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -31,20 +31,21 @@ export const useAuth = () => {
   return context;
 };
 
-// 10 minutes total inactivity timeout
-const INACTIVITY_TIMEOUT = 10 * 60 * 1000;
-const WARNING_TIME = 5 * 60 * 1000; // show warning 5 min before expiry
+// Timeout settings
+const INACTIVITY_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+const WARNING_TIME = 5 * 60 * 1000;        // Show warning 5 min before
 
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [showWarning, setShowWarning] = useState(false);
   const navigate = useNavigate();
+
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
   const warningTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
 
-  // Load persisted user + token
+  // Load persisted data on mount
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
@@ -62,7 +63,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }, []);
 
-  // Decode JWT token only if user not saved
+  // Decode JWT if user not already loaded
   useEffect(() => {
     if (token && !user) {
       try {
@@ -78,18 +79,21 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         localStorage.setItem('user', JSON.stringify(derivedUser));
       } catch {
         console.error('Invalid token');
-        setToken(null);
         localStorage.removeItem('token');
         localStorage.removeItem('user');
+        setToken(null);
         setUser(null);
       }
     }
   }, [token, user]);
 
-  // Keep user persisted
+  // Persist user
   useEffect(() => {
-    if (user) localStorage.setItem('user', JSON.stringify(user));
-    else localStorage.removeItem('user');
+    if (user) {
+      localStorage.setItem('user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('user');
+    }
   }, [user]);
 
   const clearTimers = () => {
@@ -101,18 +105,16 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const resetInactivityTimer = () => {
     clearTimers();
-    setShowWarning(false);
     lastActivityRef.current = Date.now();
 
-    // Show warning 5 minutes before logout
+    // Show warning 5 minutes before expiry
     warningTimerRef.current = setTimeout(() => {
       setShowWarning(true);
     }, INACTIVITY_TIMEOUT - WARNING_TIME);
 
-    // Logout after total timeout
+    // Auto logout after full timeout
     inactivityTimerRef.current = setTimeout(() => {
-      const now = Date.now();
-      const elapsed = now - lastActivityRef.current;
+      const elapsed = Date.now() - lastActivityRef.current;
       if (elapsed >= INACTIVITY_TIMEOUT) {
         console.log('Session expired due to inactivity.');
         alert('Your session has expired. Please log in again.');
@@ -123,6 +125,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const stayActive = () => {
     setShowWarning(false);
+    lastActivityRef.current = Date.now();
     resetInactivityTimer();
   };
 
@@ -134,8 +137,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = async () => {
-    setShowWarning(false); // Explicitly hide warning on logout (including automatic)
+    setShowWarning(false);
     const currentToken = localStorage.getItem('token');
+
     try {
       if (currentToken) {
         await fetch('/api/logout', {
@@ -158,11 +162,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     navigate('/login', { replace: true });
   };
 
-  // Track user activity and reset timer
+  // Activity tracking — IGNORE when warning is shown
   useEffect(() => {
     if (!user) return;
 
     const handleActivity = () => {
+      // CRITICAL: Ignore all activity when modal is open
+      if (showWarning) return;
+
       lastActivityRef.current = Date.now();
       resetInactivityTimer();
     };
@@ -170,7 +177,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     const events = ['mousemove', 'keydown', 'scroll', 'click', 'touchstart'];
     events.forEach(event => window.addEventListener(event, handleActivity, true));
 
-    // Also handle when tab becomes visible again
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         const now = Date.now();
@@ -178,13 +184,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
         if (elapsed >= INACTIVITY_TIMEOUT) {
           logout();
-        } else if (elapsed >= INACTIVITY_TIMEOUT - WARNING_TIME) {
+        } else if (elapsed >= INACTIVITY_TIMEOUT - WARNING_TIME && !showWarning) {
           setShowWarning(true);
         }
       }
     };
+
     document.addEventListener('visibilitychange', handleVisibility);
 
+    // Start timer on login
     resetInactivityTimer();
 
     return () => {
@@ -192,13 +200,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       document.removeEventListener('visibilitychange', handleVisibility);
       clearTimers();
     };
-  }, [user]);
+  }, [user, showWarning]); // ← showWarning in deps to rebind handler
 
   return (
     <AuthContext.Provider value={{ user, token, login, logout }}>
       {children}
 
-      {/* Session Expiry Warning Modal */}
+      {/* Session Warning Modal */}
       {showWarning && (
         <div
           style={{
@@ -212,23 +220,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 9999,
+            // Prevent interaction with background
+            pointerEvents: 'none',
           }}
+          onClick={(e) => e.stopPropagation()}
         >
           <div
             style={{
               backgroundColor: '#ffffff',
               border: '1px solid #000000',
-              borderRadius: '0', // Square corners for classic look
+              borderRadius: '0',
               boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
               maxWidth: '400px',
               width: '90%',
-              fontFamily: 'Arial, sans-serif', // Classic font
-              overflow: 'hidden', // For clean edges
+              fontFamily: 'Arial, sans-serif',
+              overflow: 'hidden',
+              pointerEvents: 'auto', // Re-enable for modal
             }}
           >
+            {/* Title Bar */}
             <div
               style={{
-                backgroundColor: '#000080', // Classic navy blue title bar (like old Windows)
+                backgroundColor: '#000080',
                 color: '#ffffff',
                 padding: '8px 12px',
                 fontWeight: 'bold',
@@ -248,51 +261,62 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
                   fontSize: '16px',
                   cursor: 'pointer',
                   padding: 0,
+                  width: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
                 ×
               </button>
             </div>
+
+            {/* Body */}
             <div
               style={{
                 padding: '20px',
                 textAlign: 'center',
-                backgroundColor: '#f0f0f0', // Light gray for classic dialog feel
+                backgroundColor: '#f0f0f0',
                 color: '#000000',
               }}
             >
-              <p style={{ marginBottom: '15px', fontSize: '14px' }}>
+              <p style={{ marginBottom: '15px', fontSize: '14px', lineHeight: '1.5' }}>
                 Your session will expire in 5 minutes due to inactivity.
                 <br />
                 Would you like to stay active?
               </p>
-              <button
-                onClick={stayActive}
-                style={{
-                  backgroundColor: '#c0c0c0', // Classic silver button
-                  border: '1px outset #ffffff',
-                  color: '#000000',
-                  padding: '6px 16px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  marginRight: '10px',
-                }}
-              >
-                Yes, Stay Active
-              </button>
-              <button
-                onClick={logout}
-                style={{
-                  backgroundColor: '#c0c0c0',
-                  border: '1px outset #ffffff',
-                  color: '#000000',
-                  padding: '6px 16px',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                }}
-              >
-                Log Out Now
-              </button>
+              <div>
+                <button
+                  onClick={stayActive}
+                  style={{
+                    backgroundColor: '#c0c0c0',
+                    border: '1px outset #ffffff',
+                    color: '#000000',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    marginRight: '10px',
+                    minWidth: '100px',
+                  }}
+                >
+                  Yes, Stay Active
+                </button>
+                <button
+                  onClick={logout}
+                  style={{
+                    backgroundColor: '#c0c0c0',
+                    border: '1px outset #ffffff',
+                    color: '#000000',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    minWidth: '100px',
+                  }}
+                >
+                  Log Out Now
+                </button>
+              </div>
             </div>
           </div>
         </div>
