@@ -1,14 +1,17 @@
+// db.js - FULLY FIXED JavaScript (no TypeScript types)
+// Ready to run with: node server.js
+
 import { Pool } from 'pg';
 import { config } from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcrypt';
-import crypto from 'crypto'; // For password generation
+import crypto from 'crypto';
 
 // Load environment variables
 config({ path: './.env' });
 
-// Debug environment variables
+// Debug environment variables (password redacted)
 console.log('Environment variables:', {
   PG_HOST: process.env.PG_HOST,
   PG_PORT: process.env.PG_PORT,
@@ -26,7 +29,7 @@ const pool = new Pool({
   password: String(process.env.PG_PASSWORD || ''),
 });
 
-// Developer code for wipe, backup, restore (can be moved to env in production)
+// Developer code for wipe, backup, restore
 const DEVELOPER_CODE = process.env.DEVELOPER_CODE || 'DEVELOPER_WIPE_2025';
 
 // Function to generate unique 6-character password
@@ -55,18 +58,18 @@ async function createTableIfNotExists(query, tableName) {
     await pool.query(query);
     console.log(`Table "${tableName}" created or already exists.`);
   } catch (error) {
-    const code = error && error.code ? error.code : null;
-    const message = error && error.message ? error.message : String(error);
+    const code = error?.code;
+    const message = error?.message;
     if (code === '42P07' || (message && message.includes('already exists'))) {
       console.log(`Table "${tableName}" already exists - skipping creation.`);
     } else {
       console.error(`Error creating table "${tableName}":`, message);
-      throw error; // Re-throw non-idempotent errors
+      throw error;
     }
   }
 }
 
-// Helper function to add column if not exists using DO block
+// Helper function to add column if not exists
 async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
   const query = `
     DO $$
@@ -87,7 +90,7 @@ async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
   }
 }
 
-// Database backup function (updated to require developer code, include new junction table and serial numbers)
+// Database backup function
 export async function backupDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -96,7 +99,7 @@ export async function backupDatabase(developerCode) {
     const tables = [
       'users', 'supervisors', 'settings', 'audit_logs', 'categories', 'vendors',
       'items', 'items_out', 'requests', 'request_items', 'approvals', 'rejections',
-      'request_approvers', 'item_serial_numbers' // New table
+      'request_approvers', 'item_serial_numbers'
     ];
     const backup = {};
     for (const table of tables) {
@@ -111,7 +114,7 @@ export async function backupDatabase(developerCode) {
   }
 }
 
-// Database restore function (updated to require developer code, fixed to preserve original IDs and reset sequences, handle new tables)
+// Database restore function
 export async function restoreDatabase(backupData, developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -119,7 +122,6 @@ export async function restoreDatabase(backupData, developerCode) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Truncate tables in reverse dependency order (CASCADE handles FK)
     const truncateOrder = [
       'audit_logs', 'rejections', 'approvals', 'request_items', 'request_approvers', 'item_serial_numbers',
       'requests', 'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
@@ -127,7 +129,6 @@ export async function restoreDatabase(backupData, developerCode) {
     for (const table of truncateOrder) {
       await client.query(`TRUNCATE TABLE ${table} CASCADE`);
     }
-    // Insert tables in dependency order, preserving original IDs
     const insertOrder = [
       'users', 'supervisors', 'settings', 'categories', 'vendors', 'items',
       'item_serial_numbers', 'items_out', 'requests', 'request_approvers',
@@ -135,7 +136,6 @@ export async function restoreDatabase(backupData, developerCode) {
     ];
     for (const table of insertOrder) {
       if (!backupData[table] || backupData[table].length === 0) {
-        // For empty tables, reset sequence to 1
         await client.query(`SELECT setval('${table}_id_seq', 1, false);`);
         continue;
       }
@@ -146,7 +146,6 @@ export async function restoreDatabase(backupData, developerCode) {
         const values = keys.map(key => row[key]);
         await client.query(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
       }
-      // Reset sequence after inserting
       const maxId = Math.max(...backupData[table].map(r => r.id || 0));
       const isCalled = maxId > 0;
       await client.query(`SELECT setval('${table}_id_seq', ${maxId}, ${isCalled});`);
@@ -163,7 +162,7 @@ export async function restoreDatabase(backupData, developerCode) {
   }
 }
 
-// Database wipe function (requires developer code, updated for new table)
+// Database wipe function
 export async function wipeDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -171,7 +170,6 @@ export async function wipeDatabase(developerCode) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Truncate all tables (CASCADE handles FK)
     const truncateOrder = [
       'audit_logs', 'rejections', 'approvals', 'request_items', 'request_approvers', 'item_serial_numbers',
       'requests', 'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
@@ -191,7 +189,7 @@ export async function wipeDatabase(developerCode) {
   }
 }
 
-// Initialize database tables with enhanced error handling (add request_approvers junction table and serial numbers)
+// Initialize database tables
 export async function initDB() {
   try {
     // Users table
@@ -209,24 +207,7 @@ export async function initDB() {
       );
     `, 'users');
     await addColumnIfNotExists('users', 'deleted_at', 'TIMESTAMP');
-    // Add/migrate columns for users if needed (using helper for conditional add)
-    try {
-      await addColumnIfNotExists('users', 'first_name', 'VARCHAR(255) NOT NULL DEFAULT \'\'');
-      await addColumnIfNotExists('users', 'last_name', 'VARCHAR(255) NOT NULL DEFAULT \'\'');
-      await addColumnIfNotExists('users', 'email', 'VARCHAR(255) UNIQUE NOT NULL DEFAULT \'\'');
-      // Drop defaults after adding (safe if column exists)
-      await pool.query(`ALTER TABLE users ALTER COLUMN first_name DROP DEFAULT;`);
-      await pool.query(`ALTER TABLE users ALTER COLUMN last_name DROP DEFAULT;`);
-      await pool.query(`ALTER TABLE users ALTER COLUMN email DROP DEFAULT;`);
-      await pool.query(`ALTER TABLE users ADD CONSTRAINT IF NOT EXISTS check_role CHECK (role IN ('requester', 'approver', 'issuer', 'superadmin'));`);
-      console.log('Users table migration completed successfully.');
-    } catch (alterError) {
-      if (!alterError.message.includes('already exists') && !alterError.message.includes('already have')) {
-        console.warn('Warning during users schema migration:', alterError.message);
-      } else {
-        console.log('Users migration skipped (already applied).');
-      }
-    }
+
     // Supervisors table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS supervisors (
@@ -238,6 +219,7 @@ export async function initDB() {
       );
     `, 'supervisors');
     await addColumnIfNotExists('supervisors', 'deleted_at', 'TIMESTAMP');
+
     // Settings table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS settings (
@@ -248,6 +230,7 @@ export async function initDB() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'settings');
+
     // Audit logs table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS audit_logs (
@@ -259,6 +242,7 @@ export async function initDB() {
         timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'audit_logs');
+
     // Categories table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS categories (
@@ -272,8 +256,8 @@ export async function initDB() {
       );
     `, 'categories');
     await addColumnIfNotExists('categories', 'deleted_at', 'TIMESTAMP');
-    // Ensure parent_id column exists (for migration)
     await addColumnIfNotExists('categories', 'parent_id', 'INTEGER REFERENCES categories(id) ON DELETE CASCADE');
+
     // Vendors table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS vendors (
@@ -285,6 +269,7 @@ export async function initDB() {
       );
     `, 'vendors');
     await addColumnIfNotExists('vendors', 'deleted_at', 'TIMESTAMP');
+
     // Items table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS items (
@@ -304,20 +289,10 @@ export async function initDB() {
         deleted_at TIMESTAMP
       );
     `, 'items');
-    // Add deleted_at column to items
     await addColumnIfNotExists('items', 'deleted_at', 'TIMESTAMP');
-    // Migrate vendor_id if needed
-    try {
-      await addColumnIfNotExists('items', 'vendor_id', 'INTEGER REFERENCES vendors(id)');
-      console.log('Items vendor_id migration completed.');
-    } catch (alterError) {
-      if (!alterError.message.includes('already exists')) {
-        console.warn('Warning during items schema migration:', alterError.message);
-      } else {
-        console.log('Items migration skipped (already applied).');
-      }
-    }
-    // New: Item Serial Numbers table
+    await addColumnIfNotExists('items', 'vendor_id', 'INTEGER REFERENCES vendors(id)');
+
+    // Item Serial Numbers table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS item_serial_numbers (
         id SERIAL PRIMARY KEY,
@@ -331,6 +306,7 @@ export async function initDB() {
         updated_at TIMESTAMP
       );
     `, 'item_serial_numbers');
+
     // Items out table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS items_out (
@@ -341,7 +317,8 @@ export async function initDB() {
         date_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'items_out');
-    // Requests table (removed selected_approver_id, as multi now handled by junction)
+
+    // Requests table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS requests (
         id SERIAL PRIMARY KEY,
@@ -363,7 +340,8 @@ export async function initDB() {
       );
     `, 'requests');
     await addColumnIfNotExists('requests', 'deleted_at', 'TIMESTAMP');
-    // New junction table for multi-approvers
+
+    // Request approvers junction table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS request_approvers (
         id SERIAL PRIMARY KEY,
@@ -373,6 +351,7 @@ export async function initDB() {
         UNIQUE(request_id, approver_id)
       );
     `, 'request_approvers');
+
     // Request items table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS request_items (
@@ -387,6 +366,7 @@ export async function initDB() {
       );
     `, 'request_items');
     await addColumnIfNotExists('request_items', 'serial_number', 'VARCHAR(255)');
+
     // Approvals table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS approvals (
@@ -397,6 +377,7 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'approvals');
+
     // Rejections table
     await createTableIfNotExists(`
       CREATE TABLE IF NOT EXISTS rejections (
@@ -407,7 +388,8 @@ export async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `, 'rejections');
-    // Seed default settings if not exist
+
+    // Seed default settings
     const defaults = [
       { key: 'from_name', value: 'Inventory System', desc: 'Sender name for low stock alert emails' },
       { key: 'from_email', value: 'helloriceug@gmail.com', desc: 'Sender email for low stock alert emails' }
@@ -421,14 +403,13 @@ export async function initDB() {
             [def.key, def.value, def.desc]
           );
           console.log(`Default setting "${def.key}" inserted.`);
-        } else {
-          console.log(`Default setting "${def.key}" already exists.`);
         }
       } catch (seedError) {
         console.warn(`Error seeding default setting "${def.key}":`, seedError.message);
       }
     }
-    // Seed default superadmin user: stockadmin
+
+    // Seed default superadmin user
     try {
       const adminExists = await pool.query('SELECT id FROM users WHERE username = $1', ['stockadmin']);
       if (adminExists.rowCount === 0) {
@@ -438,21 +419,20 @@ export async function initDB() {
           'INSERT INTO users (first_name, last_name, username, email, password, role, created_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)',
           ['Stock', 'Admin', 'stockadmin', 'stockadmin@inventory.local', hashedPassword, 'superadmin']
         );
-        console.log('Default superadmin user "stockadmin" created with password: ezekeil@vobissadmin');
-      } else {
-        console.log('Default superadmin user "stockadmin" already exists.');
+        console.log('Default superadmin user "stockadmin" created.');
       }
     } catch (seedError) {
       console.warn('Error seeding default superadmin user:', seedError.message);
     }
-    console.log('Database initialization completed successfully. All tables are ready.');
+
+    console.log('Database initialization completed successfully.');
   } catch (error) {
     console.error('Critical error during database initialization:', error.stack);
-    throw error; // Re-throw to prevent server start if DB init fails
+    throw error;
   }
 }
 
-// Settings functions remain the same...
+// Settings functions
 export async function getSettings() {
   try {
     const result = await pool.query('SELECT * FROM settings ORDER BY key_name ASC');
@@ -466,6 +446,7 @@ export async function getSettings() {
     throw error;
   }
 }
+
 export async function updateSetting(keyName, value) {
   try {
     const result = await pool.query(
@@ -473,7 +454,6 @@ export async function updateSetting(keyName, value) {
       [value, keyName]
     );
     if (result.rowCount === 0) {
-      // Insert if not exists
       await pool.query(
         'INSERT INTO settings (key_name, value, description) VALUES ($1, $2, $3)',
         [keyName, value, '']
@@ -486,7 +466,7 @@ export async function updateSetting(keyName, value) {
   }
 }
 
-// Updated Users functions with audit logging
+// Users functions
 export async function getUserByUsername(username) {
   try {
     const result = await pool.query('SELECT id, first_name, last_name, username, email, password, role FROM users WHERE username = $1 AND deleted_at IS NULL', [username]);
@@ -496,6 +476,7 @@ export async function getUserByUsername(username) {
     throw error;
   }
 }
+
 export async function getUsers() {
   try {
     const result = await pool.query('SELECT id, first_name, last_name, username, email, role, created_at FROM users WHERE deleted_at IS NULL ORDER BY created_at DESC');
@@ -505,7 +486,7 @@ export async function getUsers() {
     throw error;
   }
 }
-// New function to get approvers
+
 export async function getApprovers() {
   try {
     const result = await pool.query(`
@@ -523,6 +504,7 @@ export async function getApprovers() {
     throw error;
   }
 }
+
 export async function createUser(firstName, lastName, email, role, userId, ip) {
   const client = await pool.connect();
   try {
@@ -534,9 +516,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip) {
       'INSERT INTO users (first_name, last_name, username, email, password, role, created_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP, NULL) RETURNING *',
       [firstName.trim(), lastName.trim(), username, email.trim().toLowerCase(), hashedPassword, role]
     );
-    // Log audit
     await insertAuditLog(client, userId, 'create_user', ip, { username, role });
-    // Send email (import and call from emailService)
     const { sendUserCredentials } = await import('./emailService.js');
     await sendUserCredentials(email, username, plainPassword);
     await client.query('COMMIT');
@@ -552,6 +532,7 @@ export async function createUser(firstName, lastName, email, role, userId, ip) {
     client.release();
   }
 }
+
 export async function resetUserPassword(userId, currentUserId, ip) {
   const client = await pool.connect();
   try {
@@ -565,9 +546,7 @@ export async function resetUserPassword(userId, currentUserId, ip) {
       'UPDATE users SET password = $1 WHERE id = $2 RETURNING *',
       [hashedPassword, userId]
     );
-    // Log audit
     await insertAuditLog(client, currentUserId, 'reset_password', ip, { user_id: userId, username });
-    // Send reset email
     const { sendResetPassword } = await import('./emailService.js');
     await sendResetPassword(email, username, plainPassword);
     await client.query('COMMIT');
@@ -580,6 +559,7 @@ export async function resetUserPassword(userId, currentUserId, ip) {
     client.release();
   }
 }
+
 export async function updateUserRole(userId, role, currentUserId, ip) {
   const client = await pool.connect();
   try {
@@ -592,8 +572,6 @@ export async function updateUserRole(userId, role, currentUserId, ip) {
       'UPDATE users SET role = $1 WHERE id = $2 RETURNING *',
       [role, userId]
     );
-    if (result.rowCount === 0) throw new Error('User not found');
-    // Log audit
     await insertAuditLog(client, currentUserId, 'update_user_role', ip, { user_id: userId, username, old_role, new_role: role });
     await client.query('COMMIT');
     return result.rows[0];
@@ -605,19 +583,17 @@ export async function updateUserRole(userId, role, currentUserId, ip) {
     client.release();
   }
 }
-// Update user details (name, email, role)
+
 export async function updateUser(userId, updates, currentUserId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { first_name, last_name, email, role } = updates;
-  
-    // Validate role
+
     if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
       throw new Error('Invalid role');
     }
-  
-    // Check if email already exists (excluding current user)
+
     if (email) {
       const emailCheck = await client.query(
         'SELECT id FROM users WHERE email = $1 AND id != $2 AND deleted_at IS NULL',
@@ -627,25 +603,22 @@ export async function updateUser(userId, updates, currentUserId, ip) {
         throw new Error('Email already exists');
       }
     }
-  
+
     const current = await client.query(
       'SELECT first_name AS old_first_name, last_name AS old_last_name, email AS old_email, role AS old_role, username FROM users WHERE id = $1 AND deleted_at IS NULL',
       [userId]
     );
     if (current.rowCount === 0) throw new Error('User not found');
     const old_values = current.rows[0];
-    delete old_values.username; // No need to include username in old_values
-  
+    delete old_values.username;
+
     const result = await client.query(
       'UPDATE users SET first_name = $1, last_name = $2, email = $3, role = $4 WHERE id = $5 RETURNING *',
       [first_name?.trim(), last_name?.trim(), email?.trim().toLowerCase(), role, userId]
     );
-  
-    if (result.rowCount === 0) throw new Error('User not found');
-  
-    // Log audit
+
     await insertAuditLog(client, currentUserId, 'update_user', ip, { user_id: userId, username: old_values.username, old_values, new_values: { first_name, last_name, email, role } });
-  
+
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -657,26 +630,23 @@ export async function updateUser(userId, updates, currentUserId, ip) {
   }
 }
 
-// Delete user - FULLY FIXED
 export async function deleteUser(userId, currentUserId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-  
-    // Prevent self-deletion
+
     if (userId === currentUserId) {
       throw new Error('Cannot delete your own account');
     }
-  
+
     const userResult = await client.query('SELECT first_name, last_name, username, email FROM users WHERE id = $1 AND deleted_at IS NULL', [userId]);
     if (userResult.rowCount === 0) throw new Error('User not found');
     const deletedUser = userResult.rows[0];
-  
+
     await client.query('UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [userId]);
-  
-    // FIXED: Pass the full deletedUser object
-    await insertAuditLog(client, currentUserId, 'delete_user', ip, { 
-      user_id: userId, 
+
+    await insertAuditLog(client, currentUserId, 'delete_user', ip, {
+      user_id: userId,
       deleted_user: {
         username: deletedUser.username,
         email: deletedUser.email,
@@ -684,7 +654,7 @@ export async function deleteUser(userId, currentUserId, ip) {
         last_name: deletedUser.last_name
       }
     });
-  
+
     await client.query('COMMIT');
     return { message: 'User deleted successfully' };
   } catch (error) {
@@ -696,7 +666,7 @@ export async function deleteUser(userId, currentUserId, ip) {
   }
 }
 
-// Supervisors functions remain the same...
+// Supervisors functions
 export async function getSupervisors() {
   try {
     const result = await pool.query('SELECT * FROM supervisors WHERE deleted_at IS NULL ORDER BY name ASC');
@@ -706,6 +676,7 @@ export async function getSupervisors() {
     throw error;
   }
 }
+
 export async function addSupervisor(supervisorData) {
   try {
     const { name, email } = supervisorData;
@@ -719,12 +690,13 @@ export async function addSupervisor(supervisorData) {
     return result.rows[0];
   } catch (error) {
     console.error('Error adding supervisor:', error.stack);
-    if (error.code === '23505') { // Unique violation
+    if (error.code === '23505') {
       throw new Error('Email already exists');
     }
     throw error;
   }
 }
+
 export async function updateSupervisor(supervisorId, supervisorData) {
   try {
     const { name, email } = supervisorData;
@@ -739,12 +711,13 @@ export async function updateSupervisor(supervisorId, supervisorData) {
     return result.rows[0];
   } catch (error) {
     console.error('Error updating supervisor:', error.stack);
-    if (error.code === '23505') { // Unique violation
+    if (error.code === '23505') {
       throw new Error('Email already exists');
     }
     throw error;
   }
 }
+
 export async function deleteSupervisor(supervisorId) {
   try {
     const result = await pool.query('UPDATE supervisors SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *', [supervisorId]);
@@ -756,19 +729,16 @@ export async function deleteSupervisor(supervisorId) {
   }
 }
 
-// Updated Audit Logs to include full name
-export async function insertAuditLog(clientOrPool, userId, action, ip, details = null) {
+// Audit logs
+export async function insertAuditLog(clientOrPool, userId, action, ip, details) {
   let client = pool;
   let uid = userId;
   let act = action;
   let iip = ip;
   let det = details;
-  if (clientOrPool === null || clientOrPool === undefined) {
-    // no client provided, use pool
-  } else if (clientOrPool && typeof clientOrPool === 'object' && typeof clientOrPool.query === 'function') {
+  if (clientOrPool && typeof clientOrPool === 'object' && typeof clientOrPool.query === 'function') {
     client = clientOrPool;
   } else {
-    // first arg is actually userId, shift the arguments
     det = iip;
     iip = act;
     act = uid;
@@ -784,6 +754,7 @@ export async function insertAuditLog(clientOrPool, userId, action, ip, details =
     throw error;
   }
 }
+
 export async function getAuditLogs() {
   try {
     const result = await pool.query(`
@@ -802,7 +773,7 @@ export async function getAuditLogs() {
   }
 }
 
-// Categories functions with audit logging and hierarchy support
+// Categories functions with hierarchy and item counts
 export async function getCategories() {
   try {
     const allCategories = await pool.query('SELECT * FROM categories WHERE deleted_at IS NULL ORDER BY name ASC');
@@ -811,9 +782,10 @@ export async function getCategories() {
     itemsResult.rows.forEach(item => {
       categoryCounts[item.category_id] = parseInt(item.count, 10);
     });
-    // Build hierarchy
+
     const categoryMap = {};
     const roots = [];
+
     allCategories.rows.forEach(cat => {
       cat.subcategories = [];
       cat.itemCount = categoryCounts[cat.id] || 0;
@@ -826,16 +798,18 @@ export async function getCategories() {
         }
       }
     });
-    // Aggregate totalItems for main categories
+
     roots.forEach(root => {
       root.totalItems = root.subcategories.reduce((sum, sub) => sum + (sub.itemCount || 0), 0);
     });
+
     return roots;
   } catch (error) {
     console.error('Error fetching categories:', error.stack);
     throw error;
   }
 }
+
 export async function addCategory(categoryData, userId, ip) {
   const client = await pool.connect();
   try {
@@ -852,7 +826,6 @@ export async function addCategory(categoryData, userId, ip) {
         [sub.name, sub.description || null, mainId]
       );
     }
-    // Log audit
     await insertAuditLog(client, userId, 'create_category', ip, { category_name: name, sub_count: subcategories.length });
     await client.query('COMMIT');
     return mainResult.rows[0];
@@ -864,26 +837,30 @@ export async function addCategory(categoryData, userId, ip) {
     client.release();
   }
 }
+
 export async function updateCategory(categoryId, categoryData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { name, description, subcategories = [] } = categoryData;
-    const current = await client.query('SELECT name FROM categories WHERE id = $1 AND parent_id IS NULL AND deleted_at IS NULL', [categoryId]);
-    if (current.rowCount === 0) throw new Error('Main category not found');
+
+    // Update main category
     await client.query(
       'UPDATE categories SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND deleted_at IS NULL',
       [name, description || null, categoryId]
     );
-    // Fetch existing subs
+
+    // Sync subcategories
     const existingSubs = await client.query('SELECT id FROM categories WHERE parent_id = $1 AND deleted_at IS NULL', [categoryId]);
     const existingIds = existingSubs.rows.map(r => r.id);
     const providedIds = subcategories.filter(s => s.id).map(s => parseInt(s.id));
+
     // Delete removed
     const toDelete = existingIds.filter(id => !providedIds.includes(id));
     for (const delId of toDelete) {
       await client.query('UPDATE categories SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [delId]);
     }
+
     // Update or create
     for (const sub of subcategories) {
       if (sub.id) {
@@ -898,10 +875,35 @@ export async function updateCategory(categoryId, categoryData, userId, ip) {
         );
       }
     }
-    // Log audit
+
+    // Audit log
     await insertAuditLog(client, userId, 'update_category', ip, { category_id: categoryId, category_name: name, sub_count: subcategories.length });
+
     await client.query('COMMIT');
-    return { id: categoryId, name, description };
+
+    // Return full nested hierarchy for the updated root
+    const all = await pool.query('SELECT * FROM categories WHERE deleted_at IS NULL ORDER BY name ASC');
+    const itemCounts = await pool.query('SELECT category_id, COUNT(*) as count FROM items WHERE category_id IS NOT NULL AND deleted_at IS NULL GROUP BY category_id');
+    const countsMap = {};
+    itemCounts.rows.forEach(r => (countsMap[r.category_id] = parseInt(r.count, 10)));
+
+    const map = {};
+    const roots = [];
+
+    all.rows.forEach(cat => {
+      cat.subcategories = [];
+      cat.itemCount = countsMap[cat.id] || 0;
+      map[cat.id] = cat;
+      if (!cat.parent_id) roots.push(cat);
+      else if (map[cat.parent_id]) map[cat.parent_id].subcategories.push(cat);
+    });
+
+    roots.forEach(root => {
+      root.totalItems = root.subcategories.reduce((sum, s) => sum + (s.itemCount || 0), 0);
+    });
+
+    const updatedRoot = roots.find(r => r.id === categoryId) || map[categoryId];
+    return updatedRoot;
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error updating category:', error.stack);
@@ -910,6 +912,7 @@ export async function updateCategory(categoryId, categoryData, userId, ip) {
     client.release();
   }
 }
+
 export async function deleteCategory(categoryId, userId, ip) {
   const client = await pool.connect();
   try {
@@ -917,7 +920,6 @@ export async function deleteCategory(categoryId, userId, ip) {
     const current = await client.query('SELECT name FROM categories WHERE id = $1 AND deleted_at IS NULL', [categoryId]);
     if (current.rowCount === 0) throw new Error('Category not found');
     await client.query('UPDATE categories SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *', [categoryId]);
-    // Log audit
     await insertAuditLog(client, userId, 'delete_category', ip, { category_id: categoryId, category_name: current.rows[0]?.name });
     await client.query('COMMIT');
     return { message: 'Category deleted' };
@@ -930,7 +932,7 @@ export async function deleteCategory(categoryId, userId, ip) {
   }
 }
 
-// Items functions with audit logging
+// Items functions
 export async function getItems() {
   try {
     const result = await pool.query(`
@@ -947,32 +949,33 @@ export async function getItems() {
     throw error;
   }
 }
+
 export async function addItem(itemData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, receipt_images, serial_numbers } = itemData;
-  
+
     const parsedQuantity = parseInt(quantity, 10);
     let parsedLowStockThreshold = low_stock_threshold ? parseInt(low_stock_threshold, 10) : 5;
-    if (isNaN(parsedLowStockThreshold) || parsedLowStockThreshold < 0) {
-      parsedLowStockThreshold = 5;
-    }
+    if (isNaN(parsedLowStockThreshold) || parsedLowStockThreshold < 0) parsedLowStockThreshold = 5;
     const parsedUnitPrice = unit_price ? parseFloat(unit_price) : null;
     const parsedCategoryId = category_id ? parseInt(category_id, 10) : null;
     const parsedVendorId = vendor_id ? parseInt(vendor_id, 10) : null;
+
     if (isNaN(parsedQuantity) || parsedQuantity < 0) {
       throw new Error('Quantity is required and must be non-negative');
     }
     if (unit_price && (isNaN(parsedUnitPrice) || parsedUnitPrice < 0)) {
       throw new Error('Unit price must be non-negative if provided');
     }
+
     const result = await client.query(
       'INSERT INTO items (name, description, category_id, vendor_id, quantity, low_stock_threshold, vendor_name, unit_price, receipt_images, created_at, updated_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL, NULL) RETURNING *',
       [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, receipt_images || JSON.stringify([])]
     );
     const itemId = result.rows[0].id;
-    // Insert serial numbers if provided
+
     if (Array.isArray(serial_numbers) && serial_numbers.length > 0) {
       for (const sn of serial_numbers) {
         await client.query(
@@ -981,7 +984,7 @@ export async function addItem(itemData, userId, ip) {
         );
       }
     }
-    // Log audit
+
     await insertAuditLog(client, userId, 'create_item', ip, { item_name: name, serial_count: Array.isArray(serial_numbers) ? serial_numbers.length : 0 });
     await client.query('COMMIT');
     return result.rows[0];
@@ -993,87 +996,79 @@ export async function addItem(itemData, userId, ip) {
     client.release();
   }
 }
-// Items update with low stock check and audit logging
+
 export async function updateItem(itemId, itemData, userId, ip) {
   const client = await pool.connect();
   let prevQuantity = 0;
   try {
     await client.query('BEGIN');
-  
-    // Fetch previous quantity and threshold
+
     const currentResult = await client.query('SELECT quantity, low_stock_threshold, name AS item_name FROM items WHERE id = $1 AND deleted_at IS NULL FOR UPDATE', [itemId]);
     if (currentResult.rowCount === 0) throw new Error('Item not found or deleted');
     prevQuantity = parseInt(currentResult.rows[0].quantity, 10);
-    const threshold = currentResult.rows[0].low_stock_threshold || 5;
     const item_name = currentResult.rows[0].item_name;
+
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, update_reason, receipt_images: providedReceiptImages, serial_numbers } = itemData;
-  
+
     if (!update_reason || !update_reason.trim()) {
       throw new Error('Update reason is required');
     }
-    // Get current data for update_reasons and receipt_images
+
     const itemCurrentResult = await client.query('SELECT update_reasons, receipt_images FROM items WHERE id = $1', [itemId]);
     let currentReasons = itemCurrentResult.rows[0].update_reasons || '';
-    let currentReceiptImages;
+    let currentReceiptImages = [];
     const receiptImagesValue = itemCurrentResult.rows[0].receipt_images;
     if (receiptImagesValue && typeof receiptImagesValue === 'string' && receiptImagesValue.trim() !== '') {
       try {
         currentReceiptImages = JSON.parse(receiptImagesValue);
       } catch (parseError) {
-        console.warn('Failed to parse existing receipt_images, defaulting to empty array:', parseError.message);
-        currentReceiptImages = [];
+        console.warn('Failed to parse existing receipt_images, defaulting to empty array:', parseError);
       }
-    } else {
-      currentReceiptImages = [];
     }
+
     const timestamp = new Date().toLocaleString();
     const newReasonEntry = `${update_reason} at ${timestamp}`;
     const newReasons = currentReasons ? `${currentReasons} | ${newReasonEntry}` : newReasonEntry;
-    // Handle new receipt if provided
+
     let newReceiptImagesArray = [...currentReceiptImages];
     if (providedReceiptImages) {
       try {
         const parsedProvided = JSON.parse(providedReceiptImages);
         const newPaths = parsedProvided.filter(path => !currentReceiptImages.some(img => img.path === path));
         newPaths.forEach(newPath => {
-          const newReceiptObj = {
+          newReceiptImagesArray.push({
             path: newPath,
             uploaded_at: new Date().toISOString()
-          };
-          newReceiptImagesArray.push(newReceiptObj);
+          });
         });
       } catch (e) {
         if (!currentReceiptImages.some(img => img.path === providedReceiptImages)) {
-          const newReceiptObj = {
+          newReceiptImagesArray.push({
             path: providedReceiptImages,
             uploaded_at: new Date().toISOString()
-          };
-          newReceiptImagesArray.push(newReceiptObj);
+          });
         }
       }
     }
+
     const parsedQuantity = parseInt(quantity, 10);
     let parsedLowStockThreshold = low_stock_threshold ? parseInt(low_stock_threshold, 10) : null;
     const parsedUnitPrice = unit_price !== undefined ? (unit_price ? parseFloat(unit_price) : null) : null;
     const parsedCategoryId = category_id ? parseInt(category_id, 10) : null;
     const parsedVendorId = vendor_id ? parseInt(vendor_id, 10) : null;
-    if (isNaN(parsedQuantity) || parsedQuantity < 0) {
-      throw new Error('Quantity must be non-negative');
-    }
-    if (parsedLowStockThreshold !== null && (isNaN(parsedLowStockThreshold) || parsedLowStockThreshold < 0)) {
-      throw new Error('Low stock threshold must be non-negative if provided');
-    }
-    if (parsedUnitPrice !== null && (isNaN(parsedUnitPrice) || parsedUnitPrice < 0)) {
-      throw new Error('Unit price must be non-negative if provided');
-    }
+
+    if (isNaN(parsedQuantity) || parsedQuantity < 0) throw new Error('Quantity must be non-negative');
+    if (parsedLowStockThreshold !== null && (isNaN(parsedLowStockThreshold) || parsedLowStockThreshold < 0)) throw new Error('Low stock threshold must be non-negative');
+    if (parsedUnitPrice !== null && (isNaN(parsedUnitPrice) || parsedUnitPrice < 0)) throw new Error('Unit price must be non-negative');
+
     const result = await client.query(
       'UPDATE items SET name = $1, description = $2, category_id = $3, vendor_id = $4, quantity = $5, low_stock_threshold = COALESCE($6, low_stock_threshold), vendor_name = $7, unit_price = $8, receipt_images = $9, update_reasons = $10, updated_at = CURRENT_TIMESTAMP WHERE id = $11 AND deleted_at IS NULL RETURNING *',
       [name, description || null, parsedCategoryId, parsedVendorId, parsedQuantity, parsedLowStockThreshold, vendor_name || null, parsedUnitPrice, JSON.stringify(newReceiptImagesArray), newReasons, itemId]
     );
+
     if (result.rowCount === 0) throw new Error('Item not found or deleted');
-    // Handle serial numbers update
+
     if (Array.isArray(serial_numbers)) {
-      // Delete all existing serials and re-insert
       await client.query('DELETE FROM item_serial_numbers WHERE item_id = $1', [itemId]);
       for (const sn of serial_numbers) {
         await client.query(
@@ -1082,16 +1077,16 @@ export async function updateItem(itemId, itemData, userId, ip) {
         );
       }
     }
-    // Prepare audit details
+
     let auditDetails = { item_id: itemId, item_name, reason: update_reason };
     if (parsedQuantity !== prevQuantity) {
       auditDetails.old_quantity = prevQuantity;
       auditDetails.new_quantity = parsedQuantity;
     }
-    // Log audit
+
     await insertAuditLog(client, userId, 'update_item', ip, auditDetails);
     await client.query('COMMIT');
-    const updatedItem = result.rows[0];
+
     const fullItem = await client.query(`
       SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name
       FROM items i
@@ -1108,6 +1103,7 @@ export async function updateItem(itemId, itemData, userId, ip) {
     client.release();
   }
 }
+
 export async function deleteItem(itemId, userId, ip) {
   const client = await pool.connect();
   try {
@@ -1116,10 +1112,7 @@ export async function deleteItem(itemId, userId, ip) {
     if (itemResult.rowCount === 0) throw new Error('Item not found or already deleted');
     const item_name = itemResult.rows[0].name;
     const deleted_quantity = itemResult.rows[0].quantity;
-    const result = await client.query('UPDATE items SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *', [itemId]);
-    if (result.rowCount === 0) throw new Error('Item not found or already deleted');
-  
-    // Log audit
+    await client.query('UPDATE items SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *', [itemId]);
     await insertAuditLog(client, userId, 'delete_item', ip, { item_id: itemId, item_name, deleted_quantity });
     await client.query('COMMIT');
     return { message: 'Item deleted' };
@@ -1131,7 +1124,7 @@ export async function deleteItem(itemId, userId, ip) {
     client.release();
   }
 }
-// New: Get serial numbers for an item
+
 export async function getSerialNumbersForItem(itemId) {
   try {
     const result = await pool.query(`
@@ -1147,7 +1140,8 @@ export async function getSerialNumbersForItem(itemId) {
     throw error;
   }
 }
-// Items Out functions with audit logging
+
+// Items Out
 export async function getItemsOut() {
   try {
     const result = await pool.query(`
@@ -1157,48 +1151,34 @@ export async function getItemsOut() {
       LEFT JOIN categories c ON i.category_id = c.id
       ORDER BY io.date_time DESC
     `);
-    return result.rows.map(row => ({
-      id: row.id,
-      person_name: row.person_name,
-      item_id: row.item_id,
-      quantity: row.quantity,
-      date_time: row.date_time,
-      item_name: row.item_name,
-      category_name: row.category_name,
-    }));
+    return result.rows;
   } catch (error) {
     console.error('Error fetching items out:', error.stack);
     throw error;
   }
 }
+
 export async function issueItem(issueData, userId, ip) {
   const client = await pool.connect();
-  let prevQuantity = 0;
-  let threshold = 5;
-  let itemDetails = null;
   try {
     await client.query('BEGIN');
-    console.log('Issuing item with data:', issueData);
     const { personName, itemId, quantity: issueQuantity, serial_numbers } = issueData;
     if (!personName || !itemId || !issueQuantity) {
-      throw new Error('Missing required fields: personName, itemId, and quantity are required');
+      throw new Error('Missing required fields');
     }
     const parsedIssueQuantity = parseInt(issueQuantity, 10);
-    if (parsedIssueQuantity <= 0) {
-      throw new Error('Quantity must be positive');
-    }
+    if (parsedIssueQuantity <= 0) throw new Error('Quantity must be positive');
+
     const itemCheck = await client.query(
       'SELECT quantity, low_stock_threshold, name FROM items WHERE id = $1 AND deleted_at IS NULL FOR UPDATE',
       [itemId]
     );
     if (itemCheck.rowCount === 0) throw new Error('Item not found or deleted');
-    prevQuantity = parseInt(itemCheck.rows[0].quantity, 10);
-    threshold = itemCheck.rows[0].low_stock_threshold || 5;
-    const availableQuantity = prevQuantity;
+    const availableQuantity = parseInt(itemCheck.rows[0].quantity, 10);
     if (parsedIssueQuantity > availableQuantity) {
-      throw new Error(`Insufficient stock. Only ${availableQuantity} units available. Requested: ${parsedIssueQuantity}`);
+      throw new Error(`Insufficient stock. Only ${availableQuantity} units available.`);
     }
-    // Validate serial numbers if provided
+
     if (Array.isArray(serial_numbers) && serial_numbers.length > 0) {
       if (serial_numbers.length !== parsedIssueQuantity) {
         throw new Error('Number of serial numbers must match issued quantity');
@@ -1208,19 +1188,21 @@ export async function issueItem(issueData, userId, ip) {
           'SELECT id, status FROM item_serial_numbers WHERE item_id = $1 AND serial_number = $2 FOR UPDATE',
           [itemId, sn]
         );
-        if (snCheck.rowCount === 0) throw new Error(`Serial number ${sn} not found for this item`);
-        if (snCheck.rows[0].status !== 'in_stock') throw new Error(`Serial number ${sn} is already issued or not available`);
+        if (snCheck.rowCount === 0) throw new Error(`Serial number ${sn} not found`);
+        if (snCheck.rows[0].status !== 'in_stock') throw new Error(`Serial number ${sn} is not available`);
       }
     }
+
     const result = await client.query(
       'INSERT INTO items_out (person_name, item_id, quantity, date_time) VALUES ($1, $2, $3, CURRENT_TIMESTAMP) RETURNING *',
       [personName, itemId, parsedIssueQuantity]
     );
+
     await client.query(
       'UPDATE items SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [parsedIssueQuantity, itemId]
     );
-    // Update serial numbers status
+
     if (Array.isArray(serial_numbers) && serial_numbers.length > 0) {
       for (const sn of serial_numbers) {
         await client.query(
@@ -1229,22 +1211,23 @@ export async function issueItem(issueData, userId, ip) {
         );
       }
     }
-    // Fetch updated item details for alert
+
     const updatedItemResult = await client.query('SELECT i.*, c.name AS category_name, COALESCE(v.name, i.vendor_name) AS vendor_name FROM items i LEFT JOIN categories c ON i.category_id = c.id LEFT JOIN vendors v ON i.vendor_id = v.id WHERE i.id = $1', [itemId]);
-    itemDetails = updatedItemResult.rows[0];
-    // Log audit
+    const itemDetails = updatedItemResult.rows[0];
+
     await insertAuditLog(client, userId, 'issue_item', ip, { item_id: itemId, item_name: itemCheck.rows[0].name, quantity: parsedIssueQuantity, person_name: personName, serial_numbers });
     await client.query('COMMIT');
     return { ...result.rows[0], item: itemDetails };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error in issueItem transaction:', error.stack);
+    console.error('Error in issueItem:', error.stack);
     throw error;
   } finally {
     client.release();
   }
 }
-// Low Stock and Dashboard Stats remain the same...
+
+// Dashboard stats
 export async function getLowStockItems() {
   try {
     const result = await pool.query(`
@@ -1261,6 +1244,7 @@ export async function getLowStockItems() {
     throw error;
   }
 }
+
 export async function getDashboardStats() {
   try {
     const [itemsResult, categoriesResult, itemsOutResult, lowStockResult, requestsResult] = await Promise.all([
@@ -1282,8 +1266,9 @@ export async function getDashboardStats() {
     throw error;
   }
 }
-// Updated createRequest to handle array of selectedApproverIds via junction table
-export async function createRequest(requestData, selectedApproverIds, requestType = 'material_request', userId, ip) {
+
+// Requests
+export async function createRequest(requestData, selectedApproverIds, requestType, userId, ip) {
   if (!Array.isArray(selectedApproverIds) || selectedApproverIds.length === 0) {
     throw new Error('At least one approver ID is required');
   }
@@ -1291,27 +1276,27 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
   try {
     await client.query('BEGIN');
     let { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, releaseBy, receivedBy, items, reason } = requestData;
-  
-    // Set defaults for return requests or missing fields
+
     const teamLeaderNameValue = teamLeaderName || createdBy || '';
     const teamLeaderPhoneValue = teamLeaderPhone || '';
     const ispNameValue = ispName || null;
     const deploymentValue = deployment || null;
     const releaseByValue = releaseBy || null;
     const receivedByValue = receivedBy || null;
-  
+
     const requestResult = await client.query(
       'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, type, reason, status, created_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, NULL) RETURNING *',
       [createdBy, teamLeaderNameValue, teamLeaderPhoneValue, projectName, ispNameValue, location, deploymentValue, releaseByValue, receivedByValue, requestType, reason || null, 'pending']
     );
     const requestId = requestResult.rows[0].id;
-    // Insert into junction table for each approver
+
     for (const approverId of selectedApproverIds) {
       await client.query(
         'INSERT INTO request_approvers (request_id, approver_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
         [requestId, approverId]
       );
     }
+
     for (const item of items) {
       const selectedItem = await client.query('SELECT id FROM items WHERE name = $1 AND deleted_at IS NULL', [item.name]);
       if (selectedItem.rowCount === 0) throw new Error(`Item not found: ${item.name}`);
@@ -1321,7 +1306,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
         [requestId, selectedItem.rows[0].id, quantityRequested]
       );
     }
-    // Log audit
+
     await insertAuditLog(client, userId, 'create_request', ip, { request_id: requestId, selected_approver_ids: selectedApproverIds, type: requestType });
     await client.query('COMMIT');
     return requestResult.rows[0];
@@ -1333,7 +1318,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
     client.release();
   }
 }
-// Updated getRequests to aggregate approver_names from junction table
+
 export async function getRequests(userRole, userId) {
   try {
     let query = `
@@ -1366,17 +1351,16 @@ export async function getRequests(userRole, userId) {
     throw error;
   }
 }
+
 export async function updateRequest(requestId, requestData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, items, reason } = requestData;
-    // Update main request
     await client.query(
       'UPDATE requests SET team_leader_name = $1, team_leader_phone = $2, project_name = $3, isp_name = $4, location = $5, deployment_type = $6, reason = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 AND deleted_at IS NULL',
       [teamLeaderName, teamLeaderPhone, projectName, ispName || null, location, deployment, reason || null, requestId]
     );
-    // Delete old items and re-insert (simple approach; adjust if needed)
     await client.query('DELETE FROM request_items WHERE request_id = $1', [requestId]);
     for (const item of items) {
       const selectedItem = await client.query('SELECT id FROM items WHERE name = $1 AND deleted_at IS NULL', [item.name]);
@@ -1386,7 +1370,6 @@ export async function updateRequest(requestId, requestData, userId, ip) {
         [requestId, selectedItem.rows[0].id, item.requested]
       );
     }
-    // Log audit
     await insertAuditLog(client, userId, 'update_request', ip, { request_id: requestId });
     await client.query('COMMIT');
     return { message: 'Request updated' };
@@ -1398,14 +1381,11 @@ export async function updateRequest(requestId, requestData, userId, ip) {
     client.release();
   }
 }
+
 export async function rejectRequest(requestId, userId, ip, rejectData) {
   const { rejectorName, reason } = rejectData || {};
-  if (!reason || !reason.trim()) {
-    throw new Error('Rejection reason is required');
-  }
-  if (!rejectorName || !rejectorName.trim()) {
-    throw new Error('Rejector name is required');
-  }
+  if (!reason || !reason.trim()) throw new Error('Rejection reason is required');
+  if (!rejectorName || !rejectorName.trim()) throw new Error('Rejector name is required');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -1413,12 +1393,11 @@ export async function rejectRequest(requestId, userId, ip, rejectData) {
       'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status IN ($3, $4) AND deleted_at IS NULL RETURNING *',
       ['rejected', requestId, 'pending', 'approved']
     );
-    if (result.rowCount === 0) throw new Error('Request not found or not rejectable (must be pending or approved)');
+    if (result.rowCount === 0) throw new Error('Request not found or not rejectable');
     await client.query(
       'INSERT INTO rejections (request_id, rejector_name, reason, created_at) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
       [requestId, rejectorName, reason]
     );
-    // Log audit
     await insertAuditLog(client, userId, 'reject_request', ip, { request_id: requestId, reason });
     await client.query('COMMIT');
     return { message: 'Request rejected' };
@@ -1430,6 +1409,7 @@ export async function rejectRequest(requestId, userId, ip, rejectData) {
     client.release();
   }
 }
+
 export async function approveRequest(requestId, approverData, userId, ip) {
   const client = await pool.connect();
   try {
@@ -1443,13 +1423,12 @@ export async function approveRequest(requestId, approverData, userId, ip) {
       'SELECT COUNT(*) AS count FROM approvals WHERE request_id = $1',
       [requestId]
     );
-    if (parseInt(approvalCount.rows[0].count, 10) >= 1) { // Single initial approval (for multi, could adjust to require all)
+    if (parseInt(approvalCount.rows[0].count, 10) >= 1) {
       await client.query(
         'UPDATE requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
         ['approved', requestId]
       );
     }
-    // Log audit
     await insertAuditLog(client, userId, 'approve_request', ip, { request_id: requestId, approver_name: approverName });
     await client.query('COMMIT');
     return { message: 'Approval recorded' };
@@ -1461,7 +1440,7 @@ export async function approveRequest(requestId, approverData, userId, ip) {
     client.release();
   }
 }
-// Updated finalizeRequest to handle returns (add to stock) vs requests (deduct from stock)
+
 export async function finalizeRequest(requestId, items, releasedBy, userId, ip) {
   const client = await pool.connect();
   try {
@@ -1473,6 +1452,7 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
     if (request.rowCount === 0) throw new Error('Request not found');
     if (request.rows[0].status !== 'approved') throw new Error('Request is not approved');
     const reqType = request.rows[0].type;
+
     for (const item of items) {
       const { itemId, quantityReceived, quantityReturned, serial_number } = item;
       const itemCheck = await client.query(
@@ -1482,33 +1462,34 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
       if (itemCheck.rowCount === 0) throw new Error('Item not found');
       const currentQuantity = parseInt(itemCheck.rows[0].quantity, 10);
       const quantityToAdjust = parseInt(quantityReceived) || 0;
-      if (quantityToAdjust <= 0) continue; // Skip if no quantity
+      if (quantityToAdjust <= 0) continue;
+
       if (reqType === 'material_request') {
-        // For requests: deduct (check availability)
         if (quantityToAdjust > currentQuantity) {
-          throw new Error(`Insufficient stock for item ID ${itemId}. Only ${currentQuantity} units available.`);
+          throw new Error(`Insufficient stock for item ID ${itemId}.`);
         }
         await client.query(
           'UPDATE items SET quantity = quantity - $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
           [quantityToAdjust, itemId]
         );
       } else if (reqType === 'item_return') {
-        // For returns: add back to stock (no availability check needed)
         await client.query(
           'UPDATE items SET quantity = quantity + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
           [quantityToAdjust, itemId]
         );
       }
+
       await client.query(
         'UPDATE request_items SET quantity_received = $1, quantity_returned = $2, serial_number = $3, updated_at = CURRENT_TIMESTAMP WHERE request_id = $4 AND item_id = $5',
         [quantityReceived || null, quantityReturned || null, serial_number || null, requestId, itemId]
       );
     }
+
     await client.query(
       'UPDATE requests SET status = $1, release_by = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3',
       ['completed', releasedBy, requestId]
     );
-    // Log audit
+
     await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy, type: reqType });
     await client.query('COMMIT');
     return { message: 'Request finalized' };
@@ -1520,7 +1501,7 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
     client.release();
   }
 }
-// Updated getRequestDetails to include approvers array from junction
+
 export async function getRequestDetails(requestId) {
   try {
     const request = await pool.query(
@@ -1528,6 +1509,7 @@ export async function getRequestDetails(requestId) {
       [requestId]
     );
     if (request.rowCount === 0) throw new Error('Request not found');
+
     const items = await pool.query(
       `SELECT ri.*, i.name AS item_name, i.quantity AS current_stock, ri.serial_number
        FROM request_items ri
@@ -1536,15 +1518,17 @@ export async function getRequestDetails(requestId) {
        ORDER BY ri.created_at DESC`,
       [requestId]
     );
+
     const approvals = await pool.query(
       'SELECT * FROM approvals WHERE request_id = $1 ORDER BY created_at DESC',
       [requestId]
     );
+
     const rejections = await pool.query(
       'SELECT * FROM rejections WHERE request_id = $1 ORDER BY created_at DESC',
       [requestId]
     );
-    // New: Fetch approvers
+
     const approvers = await pool.query(`
       SELECT u.id, u.first_name, u.last_name, u.username, ra.assigned_at
       FROM request_approvers ra
@@ -1552,6 +1536,7 @@ export async function getRequestDetails(requestId) {
       WHERE ra.request_id = $1
       ORDER BY ra.assigned_at ASC
     `, [requestId]);
+
     return {
       ...request.rows[0],
       items: items.rows,
@@ -1570,10 +1555,10 @@ export async function getRequestDetails(requestId) {
   }
 }
 
-// Export the pool for manual queries if needed
+// Export pool
 export default pool;
 
-// Close the pool on application termination
+// Close pool on termination
 process.on('SIGTERM', async () => {
   await pool.end();
   console.log('Database connection pool closed');

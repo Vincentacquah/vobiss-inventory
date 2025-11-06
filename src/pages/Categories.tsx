@@ -101,7 +101,7 @@ const Categories: React.FC = () => {
   }, [searchTerm, categories, items]);
 
   /**
-   * Loads categories from the API
+   * Loads categories from the API (returns full nested hierarchy)
    */
   const loadCategories = async () => {
     try {
@@ -188,37 +188,32 @@ const Categories: React.FC = () => {
 
   /**
    * Handles saving a new or edited category
-   * @param categoryData - The category data to save
+   * ALWAYS reloads full hierarchy from backend after save
    */
   const handleSaveCategory = async (categoryData: { name: string; description: string; subcategories: Subcategory[] }) => {
     try {
       if (editingCategory) {
         await api.updateCategory(editingCategory.id, categoryData);
-
-        setCategories(prev =>
-          prev.map(cat =>
-            cat.id === editingCategory.id
-              ? { ...cat, name: categoryData.name, description: categoryData.description, subcategories: categoryData.subcategories }
-              : cat
-          )
-        );
-
         toast({
           title: "Success",
           description: `Category "${categoryData.name}" updated successfully`,
           variant: "default",
         });
       } else {
-        const newCategory = await api.addCategory(categoryData);
-        setCategories(prev => [...prev, newCategory]);
+        await api.addCategory(categoryData);
         toast({
           title: "Success",
           description: `Category "${categoryData.name}" created successfully`,
           variant: "default",
         });
       }
+
+      // Close modal
       setIsModalOpen(false);
       setEditingCategory(null);
+
+      // RELOAD FULL NESTED HIERARCHY FROM BACKEND
+      await loadCategories();
       await loadItems();
     } catch (error) {
       console.error('Error saving category:', error);
@@ -272,7 +267,6 @@ const Categories: React.FC = () => {
 
   /**
    * Handles deleting a category
-   * @param categoryId - The ID of the category to delete
    */
   const handleDeleteCategory = async (categoryId: string) => {
     try {
@@ -296,7 +290,6 @@ const Categories: React.FC = () => {
 
   /**
    * Handles deleting an item
-   * @param itemId - The ID of the item to delete
    */
   const handleDeleteItem = async (itemId: string) => {
     try {
@@ -709,7 +702,6 @@ const Categories: React.FC = () => {
                                     <p><strong>Description:</strong> {item.description || 'N/A'}</p>
                                     <p><strong>Vendor:</strong> {item.vendor_name || 'N/A'}</p>
                                     <p><strong>Unit Price:</strong> {item.unit_price ? `$${item.unit_price}` : 'N/A'}</p>
-                                    {/* Add more item details as needed */}
                                   </div>
                                 </td>
                               </tr>
@@ -796,7 +788,6 @@ const Categories: React.FC = () => {
                                           <p><strong>Description:</strong> {item.description || 'N/A'}</p>
                                           <p><strong>Vendor:</strong> {item.vendor_name || 'N/A'}</p>
                                           <p><strong>Unit Price:</strong> {item.unit_price ? `$${item.unit_price}` : 'N/A'}</p>
-                                          {/* Add more item details as needed */}
                                         </div>
                                       </td>
                                     </tr>
