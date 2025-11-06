@@ -4,8 +4,10 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto'; // For password generation
+
 // Load environment variables
 config({ path: './.env' });
+
 // Debug environment variables
 console.log('Environment variables:', {
   PG_HOST: process.env.PG_HOST,
@@ -14,6 +16,7 @@ console.log('Environment variables:', {
   PG_USER: process.env.PG_USER,
   PG_PASSWORD: process.env.PG_PASSWORD ? '[REDACTED]' : 'undefined',
 });
+
 // Initialize PostgreSQL client
 const pool = new Pool({
   host: process.env.PG_HOST,
@@ -22,12 +25,15 @@ const pool = new Pool({
   user: process.env.PG_USER,
   password: String(process.env.PG_PASSWORD || ''),
 });
+
 // Developer code for wipe, backup, restore (can be moved to env in production)
 const DEVELOPER_CODE = process.env.DEVELOPER_CODE || 'DEVELOPER_WIPE_2025';
+
 // Function to generate unique 6-character password
 function generatePassword() {
   return crypto.randomBytes(3).toString('hex').toUpperCase();
 }
+
 // Function to generate unique username based on last name
 async function generateUniqueUsername(lastName) {
   let baseUsername = lastName.toLowerCase().trim().replace(/\s+/g, '');
@@ -42,6 +48,7 @@ async function generateUniqueUsername(lastName) {
     counter++;
   }
 }
+
 // Enhanced table creation with graceful error handling
 async function createTableIfNotExists(query, tableName) {
   try {
@@ -58,6 +65,7 @@ async function createTableIfNotExists(query, tableName) {
     }
   }
 }
+
 // Helper function to add column if not exists using DO block
 async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
   const query = `
@@ -78,6 +86,7 @@ async function addColumnIfNotExists(tableName, columnName, columnDefinition) {
     console.warn(`Warning adding column "${columnName}" to "${tableName}":`, error.message);
   }
 }
+
 // Database backup function (updated to require developer code, include new junction table and serial numbers)
 export async function backupDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
@@ -101,6 +110,7 @@ export async function backupDatabase(developerCode) {
     throw error;
   }
 }
+
 // Database restore function (updated to require developer code, fixed to preserve original IDs and reset sequences, handle new tables)
 export async function restoreDatabase(backupData, developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
@@ -152,6 +162,7 @@ export async function restoreDatabase(backupData, developerCode) {
     client.release();
   }
 }
+
 // Database wipe function (requires developer code, updated for new table)
 export async function wipeDatabase(developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
@@ -179,6 +190,7 @@ export async function wipeDatabase(developerCode) {
     client.release();
   }
 }
+
 // Initialize database tables with enhanced error handling (add request_approvers junction table and serial numbers)
 export async function initDB() {
   try {
@@ -439,6 +451,7 @@ export async function initDB() {
     throw error; // Re-throw to prevent server start if DB init fails
   }
 }
+
 // Settings functions remain the same...
 export async function getSettings() {
   try {
@@ -472,6 +485,7 @@ export async function updateSetting(keyName, value) {
     throw error;
   }
 }
+
 // Updated Users functions with audit logging
 export async function getUserByUsername(username) {
   try {
@@ -597,12 +611,12 @@ export async function updateUser(userId, updates, currentUserId, ip) {
   try {
     await client.query('BEGIN');
     const { first_name, last_name, email, role } = updates;
-   
+  
     // Validate role
     if (!['requester', 'approver', 'issuer', 'superadmin'].includes(role)) {
       throw new Error('Invalid role');
     }
-   
+  
     // Check if email already exists (excluding current user)
     if (email) {
       const emailCheck = await client.query(
@@ -613,7 +627,7 @@ export async function updateUser(userId, updates, currentUserId, ip) {
         throw new Error('Email already exists');
       }
     }
-   
+  
     const current = await client.query(
       'SELECT first_name AS old_first_name, last_name AS old_last_name, email AS old_email, role AS old_role, username FROM users WHERE id = $1 AND deleted_at IS NULL',
       [userId]
@@ -621,17 +635,17 @@ export async function updateUser(userId, updates, currentUserId, ip) {
     if (current.rowCount === 0) throw new Error('User not found');
     const old_values = current.rows[0];
     delete old_values.username; // No need to include username in old_values
-   
+  
     const result = await client.query(
       'UPDATE users SET first_name = $1, last_name = $2, email = $3, role = $4 WHERE id = $5 RETURNING *',
       [first_name?.trim(), last_name?.trim(), email?.trim().toLowerCase(), role, userId]
     );
-   
+  
     if (result.rowCount === 0) throw new Error('User not found');
-   
+  
     // Log audit
     await insertAuditLog(client, currentUserId, 'update_user', ip, { user_id: userId, username: old_values.username, old_values, new_values: { first_name, last_name, email, role } });
-   
+  
     await client.query('COMMIT');
     return result.rows[0];
   } catch (error) {
@@ -642,26 +656,35 @@ export async function updateUser(userId, updates, currentUserId, ip) {
     client.release();
   }
 }
-// Delete user
+
+// Delete user - FULLY FIXED
 export async function deleteUser(userId, currentUserId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-   
+  
     // Prevent self-deletion
     if (userId === currentUserId) {
       throw new Error('Cannot delete your own account');
     }
-   
+  
     const userResult = await client.query('SELECT first_name, last_name, username, email FROM users WHERE id = $1 AND deleted_at IS NULL', [userId]);
     if (userResult.rowCount === 0) throw new Error('User not found');
     const deletedUser = userResult.rows[0];
-   
+  
     await client.query('UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1', [userId]);
-   
-    // Log audit
-    await insertAuditLog(client, currentUserId, 'delete_user', ip, { user_id: userId, deleted_user });
-   
+  
+    // FIXED: Pass the full deletedUser object
+    await insertAuditLog(client, currentUserId, 'delete_user', ip, { 
+      user_id: userId, 
+      deleted_user: {
+        username: deletedUser.username,
+        email: deletedUser.email,
+        first_name: deletedUser.first_name,
+        last_name: deletedUser.last_name
+      }
+    });
+  
     await client.query('COMMIT');
     return { message: 'User deleted successfully' };
   } catch (error) {
@@ -672,6 +695,7 @@ export async function deleteUser(userId, currentUserId, ip) {
     client.release();
   }
 }
+
 // Supervisors functions remain the same...
 export async function getSupervisors() {
   try {
@@ -731,6 +755,7 @@ export async function deleteSupervisor(supervisorId) {
     throw error;
   }
 }
+
 // Updated Audit Logs to include full name
 export async function insertAuditLog(clientOrPool, userId, action, ip, details = null) {
   let client = pool;
@@ -776,6 +801,7 @@ export async function getAuditLogs() {
     throw error;
   }
 }
+
 // Categories functions with audit logging and hierarchy support
 export async function getCategories() {
   try {
@@ -903,6 +929,7 @@ export async function deleteCategory(categoryId, userId, ip) {
     client.release();
   }
 }
+
 // Items functions with audit logging
 export async function getItems() {
   try {
@@ -925,7 +952,7 @@ export async function addItem(itemData, userId, ip) {
   try {
     await client.query('BEGIN');
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, receipt_images, serial_numbers } = itemData;
-   
+  
     const parsedQuantity = parseInt(quantity, 10);
     let parsedLowStockThreshold = low_stock_threshold ? parseInt(low_stock_threshold, 10) : 5;
     if (isNaN(parsedLowStockThreshold) || parsedLowStockThreshold < 0) {
@@ -972,7 +999,7 @@ export async function updateItem(itemId, itemData, userId, ip) {
   let prevQuantity = 0;
   try {
     await client.query('BEGIN');
-   
+  
     // Fetch previous quantity and threshold
     const currentResult = await client.query('SELECT quantity, low_stock_threshold, name AS item_name FROM items WHERE id = $1 AND deleted_at IS NULL FOR UPDATE', [itemId]);
     if (currentResult.rowCount === 0) throw new Error('Item not found or deleted');
@@ -980,7 +1007,7 @@ export async function updateItem(itemId, itemData, userId, ip) {
     const threshold = currentResult.rows[0].low_stock_threshold || 5;
     const item_name = currentResult.rows[0].item_name;
     const { name, description, category_id, quantity, low_stock_threshold, vendor_id, vendor_name, unit_price, update_reason, receipt_images: providedReceiptImages, serial_numbers } = itemData;
-   
+  
     if (!update_reason || !update_reason.trim()) {
       throw new Error('Update reason is required');
     }
@@ -1091,7 +1118,7 @@ export async function deleteItem(itemId, userId, ip) {
     const deleted_quantity = itemResult.rows[0].quantity;
     const result = await client.query('UPDATE items SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1 AND deleted_at IS NULL RETURNING *', [itemId]);
     if (result.rowCount === 0) throw new Error('Item not found or already deleted');
-   
+  
     // Log audit
     await insertAuditLog(client, userId, 'delete_item', ip, { item_id: itemId, item_name, deleted_quantity });
     await client.query('COMMIT');
@@ -1264,7 +1291,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
   try {
     await client.query('BEGIN');
     let { createdBy, teamLeaderName, teamLeaderPhone, projectName, ispName, location, deployment, releaseBy, receivedBy, items, reason } = requestData;
-   
+  
     // Set defaults for return requests or missing fields
     const teamLeaderNameValue = teamLeaderName || createdBy || '';
     const teamLeaderPhoneValue = teamLeaderPhone || '';
@@ -1272,7 +1299,7 @@ export async function createRequest(requestData, selectedApproverIds, requestTyp
     const deploymentValue = deployment || null;
     const releaseByValue = releaseBy || null;
     const receivedByValue = receivedBy || null;
-   
+  
     const requestResult = await client.query(
       'INSERT INTO requests (created_by, team_leader_name, team_leader_phone, project_name, isp_name, location, deployment_type, release_by, received_by, type, reason, status, created_at, deleted_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, NULL) RETURNING *',
       [createdBy, teamLeaderNameValue, teamLeaderPhoneValue, projectName, ispNameValue, location, deploymentValue, releaseByValue, receivedByValue, requestType, reason || null, 'pending']
@@ -1542,15 +1569,12 @@ export async function getRequestDetails(requestId) {
     throw error;
   }
 }
+
 // Export the pool for manual queries if needed
 export default pool;
+
 // Close the pool on application termination
 process.on('SIGTERM', async () => {
   await pool.end();
   console.log('Database connection pool closed');
 });
-// Note on IP Address Logging: In your API routes (e.g., login, createRequest, etc.), extract the public IP like this:
-// const ip = req.body.ip || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection.remoteAddress || 'unknown';
-// Then pass it to the DB functions, e.g., await createRequest(data, req.user.id, ip);
-// For login: After successful auth, await insertAuditLog(null, userId, 'login', ip);
-// This ensures audit logs capture the real public IP from the request.

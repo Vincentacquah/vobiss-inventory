@@ -194,13 +194,23 @@ const Categories: React.FC = () => {
     try {
       if (editingCategory) {
         await api.updateCategory(editingCategory.id, categoryData);
+
+        setCategories(prev =>
+          prev.map(cat =>
+            cat.id === editingCategory.id
+              ? { ...cat, name: categoryData.name, description: categoryData.description, subcategories: categoryData.subcategories }
+              : cat
+          )
+        );
+
         toast({
           title: "Success",
           description: `Category "${categoryData.name}" updated successfully`,
           variant: "default",
         });
       } else {
-        await api.addCategory(categoryData);
+        const newCategory = await api.addCategory(categoryData);
+        setCategories(prev => [...prev, newCategory]);
         toast({
           title: "Success",
           description: `Category "${categoryData.name}" created successfully`,
@@ -209,8 +219,7 @@ const Categories: React.FC = () => {
       }
       setIsModalOpen(false);
       setEditingCategory(null);
-      await loadCategories();
-      await loadItems(); // Reload items in case counts changed
+      await loadItems();
     } catch (error) {
       console.error('Error saving category:', error);
       toast({
@@ -708,7 +717,7 @@ const Categories: React.FC = () => {
                           </React.Fragment>
                         );
                       })}
-                      {isExpanded && category.subcategories.map(sub => {
+                      {isExpanded && category.subcategories && category.subcategories.map(sub => {
                         const isSubExpanded = expandedSubs.has(sub.id);
                         const subItems = getCategoryItems(sub.id);
                         return (

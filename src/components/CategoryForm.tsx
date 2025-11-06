@@ -78,7 +78,7 @@ const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSave, onCancel 
       });
       return;
     }
-    // Validate subs
+
     for (const sub of formData.subcategories) {
       if (!sub.name.trim()) {
         toast({
@@ -93,101 +93,111 @@ const CategoryForm: React.FC<CategoryFormProps> = ({ category, onSave, onCancel 
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Main Category Name *
-        </label>
-        <Input
-          type="text"
-          value={formData.name}
-          onChange={(e) => handleMainChange('name', e.target.value)}
-          required
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Main Category Description
-        </label>
-        <Textarea
-          value={formData.description}
-          onChange={(e) => handleMainChange('description', e.target.value)}
-          rows={3}
-        />
-      </div>
-
-      <div>
-        <div className="flex justify-between items-center mb-3">
-          <label className="block text-sm font-medium text-gray-700">
-            Subcategories
+    <div className="w-full max-w-[1400px] mx-auto">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Main Category Name *
           </label>
+          <Input
+            type="text"
+            value={formData.name}
+            onChange={(e) => handleMainChange('name', e.target.value)}
+            required
+            className="h-12 text-lg"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Main Category Description
+          </label>
+          <Textarea
+            value={formData.description}
+            onChange={(e) => handleMainChange('description', e.target.value)}
+            rows={5}
+            className="text-lg"
+          />
+        </div>
+
+        <div>
+          <div className="flex justify-between items-center mb-3">
+            <label className="block text-sm font-medium text-gray-700">
+              Subcategories
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              onClick={addSubcategory}
+              className="flex items-center h-11 text-lg"
+            >
+              <Plus className="h-5 w-5 mr-2" />
+              Add Subcategory
+            </Button>
+          </div>
+          {formData.subcategories.map((sub, index) => (
+            <div key={index} className="border border-gray-200 rounded-lg p-5 mb-5 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Subcategory Name *
+                </label>
+                <Input
+                  type="text"
+                  value={sub.name}
+                  onChange={(e) => handleSubChange(index, 'name', e.target.value)}
+                  required
+                  className="h-11 text-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Subcategory Description
+                </label>
+                <Textarea
+                  value={sub.description}
+                  onChange={(e) => handleSubChange(index, 'description', e.target.value)}
+                  rows={3}
+                  className="text-lg"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="destructive"
+                size="lg"
+                onClick={() => removeSubcategory(index)}
+                className="flex items-center h-11 text-lg"
+              >
+                <Trash2 className="h-5 w-5 mr-2" />
+                Remove
+              </Button>
+            </div>
+          ))}
+          {formData.subcategories.length === 0 && (
+            <p className="text-sm text-gray-500">No subcategories added yet.</p>
+          )}
+        </div>
+
+        <div className="flex justify-end space-x-4 pt-6">
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            onClick={addSubcategory}
-            className="flex items-center"
+            size="lg"
+            onClick={onCancel}
+            className="h-11 text-lg"
           >
-            <Plus className="h-4 w-4 mr-2" />
-            Add Subcategory
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            size="lg"
+            className="h-11 text-lg"
+          >
+            {category ? 'Update' : 'Add'} Category
           </Button>
         </div>
-        {formData.subcategories.map((sub, index) => (
-          <div key={index} className="border border-gray-200 rounded-lg p-4 mb-4 space-y-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Subcategory Name *
-              </label>
-              <Input
-                type="text"
-                value={sub.name}
-                onChange={(e) => handleSubChange(index, 'name', e.target.value)}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Subcategory Description
-              </label>
-              <Textarea
-                value={sub.description}
-                onChange={(e) => handleSubChange(index, 'description', e.target.value)}
-                rows={2}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => removeSubcategory(index)}
-              className="flex items-center"
-            >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Remove
-            </Button>
-          </div>
-        ))}
-        {formData.subcategories.length === 0 && (
-          <p className="text-sm text-gray-500">No subcategories added yet.</p>
-        )}
-      </div>
-
-      <div className="flex justify-end space-x-3 pt-4">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onCancel}
-        >
-          Cancel
-        </Button>
-        <Button
-          type="submit"
-        >
-          {category ? 'Update' : 'Add'} Category
-        </Button>
-      </div>
-    </form>
+      </form>
+    </div>
   );
 };
 
