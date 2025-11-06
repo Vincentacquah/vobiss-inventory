@@ -16,6 +16,7 @@ interface RequestItem {
   quantity_received: number | null;
   quantity_returned: number | null;
   item_name: string;
+  serial_number?: string | null; // Added serial_number field
 }
 
 interface Approval {
@@ -190,36 +191,9 @@ const RequestDetails: React.FC = () => {
     );
   };
 
-  const generateId = () => {
-    const digits = '0123456789';
-    let idStr = '';
-    // Position 0: random digit
-    idStr += digits[Math.floor(Math.random() * 10)];
-    // Position 1: V
-    idStr += 'V';
-    // Position 2: random digit
-    idStr += digits[Math.floor(Math.random() * 10)];
-    // Position 3: random digit
-    idStr += digits[Math.floor(Math.random() * 10)];
-    // Position 4: i
-    idStr += 'i';
-    // Position 5: random digit
-    idStr += digits[Math.floor(Math.random() * 10)];
-    // Position 6: random digit
-    idStr += digits[Math.floor(Math.random() * 10)];
-    // Position 7: N
-    idStr += 'N';
-    return idStr;
-  };
-
   const handlePrint = () => {
-    const newId = generateId();
     const printContent = document.getElementById('print-content');
     if (printContent) {
-      const idElement = printContent.querySelector('#form-id');
-      if (idElement) {
-        idElement.textContent = newId;
-      }
       const originalContent = document.body.innerHTML;
       document.body.innerHTML = printContent.innerHTML;
       window.print();
@@ -246,7 +220,6 @@ const RequestDetails: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
-        {/* Header - Screen Only */}
         <div className="mb-8 flex items-center justify-between">
           <Button
             variant="outline"
@@ -276,9 +249,7 @@ const RequestDetails: React.FC = () => {
           </div>
         </div>
 
-        {/* Screen View */}
         <div className="bg-white rounded-lg shadow-md border border-gray-100 p-8" id="screen-content">
-          {/* Logo and Title - Screen */}
           <div className="text-center mb-8 pb-8 border-b border-gray-200">
             <img 
               src="/vobiss-logo.png" 
@@ -292,7 +263,6 @@ const RequestDetails: React.FC = () => {
             <StatusBadge status={statusText} config={statusConfig} />
           </div>
 
-          {/* Project Information Section - Screen */}
           <section className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b border-gray-200 pb-2">
               {isReturn ? 'Return Information' : 'Project Information'}
@@ -436,8 +406,8 @@ const RequestDetails: React.FC = () => {
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Received By</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.received_by || 'N/A'}</td>
                       </tr>
-                      <tr>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Created At</td>
+                      <tr className="bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Created At</td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.created_at).toLocaleString()}</td>
                       </tr>
                       <tr className="bg-gray-50">
@@ -451,7 +421,6 @@ const RequestDetails: React.FC = () => {
             </div>
           </section>
 
-          {/* Items and History - Screen */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <ItemsTable
               items={editing ? selectedItems : request.items}
@@ -472,10 +441,8 @@ const RequestDetails: React.FC = () => {
         </div>
       </div>
 
-      {/* Print Content - Hidden on Screen */}
       <div id="print-content" className="hidden">
         <div className="p-1 max-w-4xl mx-auto bg-white">
-          {/* Header - Print */}
           <header className="mb-2 border-b border-gray-500 pb-1 flex items-start justify-between">
             <img 
               src="/vobiss-logo.png" 
@@ -490,7 +457,6 @@ const RequestDetails: React.FC = () => {
             </div>
           </header>
 
-          {/* Section 1: Project Information - Table Layout */}
           <section className="mb-2">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">
               {isReturn ? 'Return Information' : 'Project Information'}
@@ -541,8 +507,8 @@ const RequestDetails: React.FC = () => {
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Received By</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.received_by || 'N/A'}</td>
                   </tr>
-                  <tr className="border-b border-gray-300">
-                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Created At</td>
+                  <tr className="bg-gray-50">
+                    <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Created At</td>
                     <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.created_at).toLocaleString()}</td>
                   </tr>
                   <tr className="bg-gray-50">
@@ -556,7 +522,6 @@ const RequestDetails: React.FC = () => {
 
           <hr className="my-1 border-gray-300" />
 
-          {/* Section 2: Items Table */}
           <section className="mb-2">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Items</h2>
             <div className="overflow-hidden rounded border border-gray-300">
@@ -571,6 +536,7 @@ const RequestDetails: React.FC = () => {
                       </>
                     ) : null}
                     <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Returned</th>
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Serial Number</th> {/* Added serial number column */}
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -584,6 +550,7 @@ const RequestDetails: React.FC = () => {
                         </>
                       ) : null}
                       <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_requested || 0) : (item.quantity_returned || 'N/A')}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.serial_number || 'N/A'}</td> {/* Display serial number */}
                     </tr>
                   ))}
                 </tbody>
@@ -591,7 +558,6 @@ const RequestDetails: React.FC = () => {
             </div>
           </section>
 
-          {/* Section 3: History */}
           <section className="mb-4">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">History</h2>
             <div className="border border-gray-300 rounded p-2 bg-gray-50 text-xs">
@@ -630,11 +596,6 @@ const RequestDetails: React.FC = () => {
               )}
             </div>
           </section>
-
-          {/* Form ID */}
-          <div className="mt-4 text-center italic text-xs text-gray-500 border-t border-gray-300 pt-1">
-            Form ID: <span id="form-id">TEMP</span>
-          </div>
         </div>
       </div>
 
@@ -661,30 +622,6 @@ const RequestDetails: React.FC = () => {
           @page {
             size: A4 portrait;
             margin: 0;
-            @top-left {
-              content: none;
-            }
-            @top-center {
-              content: none;
-            }
-            @top-right {
-              content: none;
-            }
-            @bottom-left {
-              content: none;
-            }
-            @bottom-center {
-              content: none;
-            }
-            @bottom-right {
-              content: none;
-            }
-            @left-middle {
-              content: none;
-            }
-            @right-middle {
-              content: none;
-            }
           }
           body {
             margin: 0;
@@ -708,8 +645,6 @@ const RequestDetails: React.FC = () => {
     </div>
   );
 };
-
-/* Helper Components - Updated for Print */
 
 const LoadingState: React.FC = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50">
@@ -922,6 +857,7 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
               </>
             ) : null}
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Returned</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Serial Number</th> {/* Added serial number column */}
             {editing && <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>}
           </tr>
         </thead>
@@ -1010,6 +946,15 @@ const ItemRow: React.FC<ItemRowProps> = ({
           />
         </td>
         <td className="px-4 py-3">
+          <Input
+            type="text"
+            value={item.serial_number || ''}
+            onChange={(e) => onItemChange(index, 'serial_number', e.target.value)}
+            className="w-full rounded-md border-gray-300"
+            placeholder="Enter serial number"
+          />
+        </td>
+        <td className="px-4 py-3">
           <Button
             type="button"
             variant="ghost"
@@ -1030,6 +975,7 @@ const ItemRow: React.FC<ItemRowProps> = ({
           </>
         ) : null}
         <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_requested || item.requested || 0) : (item.quantity_returned || item.returned || 'N/A')}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{item.serial_number || 'N/A'}</td> {/* Display serial number */}
       </>
     )}
   </tr>

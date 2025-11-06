@@ -17,7 +17,8 @@ const Inventory = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [filteredItems, setFilteredItems] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedMainCategory, setSelectedMainCategory] = useState('');
+  const [selectedSubCategory, setSelectedSubCategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [layout, setLayout] = useState<'grid' | 'list'>('list');
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -36,10 +37,10 @@ const Inventory = () => {
     loadData();
   }, []);
 
-  // Apply filters whenever items, searchTerm, or selectedCategory changes
+  // Apply filters whenever items, searchTerm, or selected categories change
   useEffect(() => {
     filterItems();
-  }, [items, searchTerm, selectedCategory]);
+  }, [items, searchTerm, selectedMainCategory, selectedSubCategory]);
 
   /**
    * Format date to "Tuesday 16/10/2025 14:30"
@@ -163,8 +164,16 @@ const Inventory = () => {
         item.vendorName?.toLowerCase().includes(term)
       );
     }
-    if (selectedCategory) {
-      filtered = filtered.filter(item => String(item.categoryId) === String(selectedCategory));
+    if (selectedSubCategory) {
+      filtered = filtered.filter(item => String(item.categoryId) === String(selectedSubCategory));
+    } else if (selectedMainCategory) {
+      const mainCat = categories.find(main => String(main.id) === String(selectedMainCategory));
+      if (mainCat) {
+        const subIds = mainCat.subcategories.map(sub => String(sub.id));
+        filtered = filtered.filter(item => 
+          String(item.categoryId) === String(selectedMainCategory) || subIds.includes(String(item.categoryId))
+        );
+      }
     }
     setFilteredItems(filtered);
   };
@@ -236,11 +245,24 @@ const Inventory = () => {
   };
 
   /**
-   * Get category name by ID
+   * Get main category name by ID, always return main even for subs
    */
   const getCategoryName = (categoryId: any) => {
-    const category = categories.find(cat => String(cat.id) === String(categoryId));
-    return category ? category.name : 'Unknown';
+    let catName = 'Unknown';
+    for (const main of categories) {
+      if (main.id === categoryId) {
+        catName = main.name;
+        break;
+      }
+      for (const sub of main.subcategories || []) {
+        if (sub.id === categoryId) {
+          catName = main.name;
+          break;
+        }
+      }
+      if (catName !== 'Unknown') break;
+    }
+    return catName;
   };
 
   /**
@@ -548,14 +570,30 @@ const Inventory = () => {
             </div>
           </div>
           <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+            value={selectedMainCategory}
+            onChange={(e) => {
+              setSelectedMainCategory(e.target.value);
+              setSelectedSubCategory('');
+            }}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="">All Categories</option>
-            {categories.map(category => (
-              <option key={category.id} value={category.id}>{category.name}</option>
+            <option value="">All Main Categories</option>
+            {categories.map(main => (
+              <option key={main.id} value={main.id}>{main.name}</option>
             ))}
+          </select>
+          <select
+            value={selectedSubCategory}
+            onChange={(e) => setSelectedSubCategory(e.target.value)}
+            disabled={!selectedMainCategory}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+          >
+            <option value="">All Subcategories</option>
+            {selectedMainCategory && categories
+              .find(main => String(main.id) === String(selectedMainCategory))
+              ?.subcategories.map((sub: any) => (
+                <option key={sub.id} value={sub.id}>{sub.name}</option>
+              ))}
           </select>
         </div>
       </div>

@@ -24,7 +24,7 @@ interface Request {
   created_at: string;
   updated_at: string;
   item_count: number;
-  reject_reason?: string | null; // Added for rejection reason
+  reject_reason?: string | null;
 }
 
 interface RequestDetails extends Request {
@@ -37,6 +37,7 @@ interface RequestDetails extends Request {
     quantity_returned: number | null;
     item_name: string;
     current_stock: number;
+    serial_number?: string | null; // New optional field
   }[];
   approvals: {
     id: number;
@@ -45,7 +46,7 @@ interface RequestDetails extends Request {
     signature: string;
     approved_at: string;
   }[];
-  rejections?: { // Added for rejection details
+  rejections?: {
     id: number;
     request_id: number;
     rejector_name: string;
@@ -69,13 +70,12 @@ const ApprovedForms: React.FC = () => {
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [approverName, setApproverName] = useState('');
   const [signature, setSignature] = useState('');
-  const [rejectReason, setRejectReason] = useState(''); // Added for rejection reason
+  const [rejectReason, setRejectReason] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isInteracting, setIsInteracting] = useState(false); // Track if user is in a modal/form
+  const [isInteracting, setIsInteracting] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
-  // Pause polling when interacting (modals open)
   useEffect(() => {
     const anyModalOpen = isFormOpen || isRejectOpen || isApproveOpen;
     setIsInteracting(anyModalOpen);
@@ -83,7 +83,6 @@ const ApprovedForms: React.FC = () => {
 
   useEffect(() => {
     const loadRequests = async () => {
-      // Skip load if user is interacting (modal open) to prevent clearing forms
       if (isInteracting) {
         console.log('Skipping request reload due to active interaction');
         return;
@@ -116,7 +115,7 @@ const ApprovedForms: React.FC = () => {
         clearInterval(intervalRef.current);
       }
     };
-  }, [canManageRequests, isInteracting]); // Re-run effect if interaction state changes
+  }, [canManageRequests, isInteracting]);
 
   useEffect(() => {
     filterRequests();
@@ -135,7 +134,15 @@ const ApprovedForms: React.FC = () => {
     setFilteredRequests(filtered);
   };
 
-  const handleFinalize = async (data: { items: { itemId: number; quantityReceived: number; quantityReturned: number }[]; releasedBy: string }) => {
+  const handleFinalize = async (data: { 
+    items: { 
+      itemId: number; 
+      quantityReceived: number; 
+      quantityReturned: number; 
+      serial_number?: string | null 
+    }[]; 
+    releasedBy: string 
+  }) => {
     if (!selectedRequest) return;
 
     if (!canFinalize) {
@@ -151,13 +158,13 @@ const ApprovedForms: React.FC = () => {
       await finalizeRequest(selectedRequest.id, data.items, data.releasedBy);
       setIsFormOpen(false);
       setSelectedRequest(null);
-      setIsInteracting(false); // Resume polling after action
+      setIsInteracting(false);
       toast({
         title: "Success",
         description: "Request finalized successfully",
         variant: "default"
       });
-      // Optionally reload after success
+
       const loadRequests = async () => {
         try {
           const data = await getRequests();
@@ -187,13 +194,13 @@ const ApprovedForms: React.FC = () => {
       setIsApproveOpen(false);
       setApproverName('');
       setSignature('');
-      setIsInteracting(false); // Resume polling
+      setIsInteracting(false);
       toast({
         title: "Success",
         description: "Request approved successfully",
         variant: "default"
       });
-      // Reload after approve
+
       const loadRequests = async () => {
         try {
           const data = await getRequests();
@@ -230,13 +237,13 @@ const ApprovedForms: React.FC = () => {
       await rejectRequest(selectedRequestId, { reason: rejectReason, rejectorName });
       setIsRejectOpen(false);
       setRejectReason('');
-      setIsInteracting(false); // Resume polling
+      setIsInteracting(false);
       toast({
         title: "Success",
         description: "Request rejected successfully",
         variant: "default"
       });
-      // Reload after reject
+
       const loadRequests = async () => {
         try {
           const data = await getRequests();
@@ -273,7 +280,7 @@ const ApprovedForms: React.FC = () => {
       const details = await getRequestDetails(requestId);
       setSelectedRequest(details);
       setIsFormOpen(true);
-      setIsInteracting(true); // Pause polling
+      setIsInteracting(true);
     } catch (error) {
       console.error('Error loading request details:', error);
       toast({
@@ -287,14 +294,14 @@ const ApprovedForms: React.FC = () => {
   const openApproveForm = async (requestId: number) => {
     setSelectedRequestId(requestId);
     setIsApproveOpen(true);
-    setIsInteracting(true); // Pause polling
+    setIsInteracting(true);
   };
 
   const openRejectForm = (requestId: number) => {
     setSelectedRequestId(requestId);
-    setRejectReason(''); // Reset reason
+    setRejectReason('');
     setIsRejectOpen(true);
-    setIsInteracting(true); // Pause polling
+    setIsInteracting(true);
   };
 
   const statusIcon = (status: string) => {
@@ -490,6 +497,7 @@ const ApprovedForms: React.FC = () => {
         </TabsContent>
       </Tabs>
 
+      {/* Finalize Form */}
       {isFormOpen && selectedRequest && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
           <div className="text-center mb-6">
@@ -503,12 +511,13 @@ const ApprovedForms: React.FC = () => {
             onCancel={() => {
               setIsFormOpen(false);
               setSelectedRequest(null);
-              setIsInteracting(false); // Resume polling
+              setIsInteracting(false);
             }}
           />
         </div>
       )}
 
+      {/* Approve Form */}
       {isApproveOpen && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
           <div className="text-center mb-6">
@@ -549,6 +558,7 @@ const ApprovedForms: React.FC = () => {
         </div>
       )}
 
+      {/* Reject Form */}
       {isRejectOpen && (
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
           <div className="text-center mb-6">
@@ -590,11 +600,10 @@ interface SkeletonTableProps {
 }
 
 const SkeletonTable: React.FC<SkeletonTableProps> = ({ canManageRequests, tabs }) => {
-  const numRows = 5; // Number of skeleton rows to show
+  const numRows = 5;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header Skeleton */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 animate-pulse">
         <div className="space-y-2">
           <div className="h-8 w-48 bg-gray-200 rounded"></div>
@@ -602,27 +611,24 @@ const SkeletonTable: React.FC<SkeletonTableProps> = ({ canManageRequests, tabs }
         </div>
       </div>
 
-      {/* Search Bar Skeleton */}
       <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 mb-6 animate-pulse">
         <div className="h-10 w-full bg-gray-200 rounded-lg"></div>
       </div>
 
-      {/* Tabs Skeleton */}
       <div className="w-full animate-pulse">
         <div className={`grid ${canManageRequests ? 'grid-cols-4' : 'grid-cols-3'} w-full bg-gray-50 rounded-xl p-1 mb-6`}>
-          {tabs.map((tab, index) => (
+          {tabs.map((_, index) => (
             <div key={index} className="h-10 bg-gray-200 rounded-lg"></div>
           ))}
         </div>
       </div>
 
-      {/* Table Skeleton */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden animate-pulse">
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['Request ID', 'Project', 'Team Leader', 'Created By', 'Project Type', 'Items', 'Created At', 'Status', 'Actions'].map((header, index) => (
+                {['Request ID', 'Project', 'Team Leader', 'Created By', 'Project Type', 'Items', 'Created At', 'Status', 'Actions'].map((_, index) => (
                   <th key={index} className="px-6 py-3">
                     <div className="h-4 w-full bg-gray-200 rounded"></div>
                   </th>
@@ -649,15 +655,24 @@ const SkeletonTable: React.FC<SkeletonTableProps> = ({ canManageRequests, tabs }
 
 interface FinalizeFormProps {
   request: RequestDetails;
-  onSave: (data: { items: { itemId: number; quantityReceived: number; quantityReturned: number }[]; releasedBy: string }) => void;
+  onSave: (data: { 
+    items: { 
+      itemId: number; 
+      quantityReceived: number; 
+      quantityReturned: number; 
+      serial_number?: string | null 
+    }[]; 
+    releasedBy: string 
+  }) => void;
   onCancel: () => void;
 }
 
 const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }) => {
-  const [items, setItems] = useState(request.items.map((item, index) => ({
+  const [items, setItems] = useState(request.items.map((item) => ({
     itemId: item.item_id,
     quantityReceived: item.quantity_received || item.quantity_requested || 0,
     quantityReturned: item.quantity_returned || 0,
+    serial_number: item.serial_number || '',
   })));
   const [releasedBy, setReleasedBy] = useState('');
   const [errors, setErrors] = useState<{ [key: number]: string }>({});
@@ -683,11 +698,14 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
     return !hasErrors;
   };
 
-  const handleItemChange = (index: number, field: 'quantityReceived' | 'quantityReturned', value: number) => {
+  const handleItemChange = (
+    index: number, 
+    field: 'quantityReceived' | 'quantityReturned' | 'serial_number', 
+    value: number | string
+  ) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
     setItems(newItems);
-    // Clear error for this item on change
     setErrors(prev => {
       const newErrors = { ...prev };
       delete newErrors[index];
@@ -708,7 +726,15 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
       return;
     }
 
-    onSave({ items, releasedBy });
+    onSave({ 
+      items: items.map(item => ({
+        itemId: item.itemId,
+        quantityReceived: item.quantityReceived,
+        quantityReturned: item.quantityReturned,
+        serial_number: item.serial_number?.trim() || null
+      })), 
+      releasedBy 
+    });
   };
 
   return (
@@ -723,59 +749,31 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Project Name</label>
-          <Input
-            value={request.project_name}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.project_name} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">ISP Name</label>
-          <Input
-            value={request.isp_name || 'N/A'}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.isp_name || 'N/A'} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Created By</label>
-          <Input
-            value={request.created_by}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.created_by} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Team Leader</label>
-          <Input
-            value={request.team_leader_name}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.team_leader_name} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Phone</label>
-          <Input
-            value={request.team_leader_phone}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.team_leader_phone} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Location</label>
-          <Input
-            value={request.location}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.location} disabled className="bg-gray-50" />
         </div>
         <div className="md:col-span-2 space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Project Type</label>
-          <Input
-            value={request.deployment_type}
-            disabled
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm bg-gray-50"
-          />
+          <Input value={request.deployment_type} disabled className="bg-gray-50" />
         </div>
         <div className="space-y-3">
           <label className="block text-sm font-semibold text-gray-700">Released By *</label>
@@ -783,7 +781,6 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
             value={releasedBy}
             onChange={(e) => setReleasedBy(e.target.value)}
             placeholder="Enter your full name as the releaser"
-            className="border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-4 py-3 shadow-sm"
           />
         </div>
       </div>
@@ -811,12 +808,13 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
       </div>
 
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">Items (Update Quantities)</h3>
-        <p className="text-sm text-gray-600">Available stock values are fetched directly from the database. Ensure received quantities do not exceed available stock.</p>
+        <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">Items (Update Quantities & Serial)</h3>
+        <p className="text-sm text-gray-600">Serial number is optional. Use it to track specific units (e.g., asset tag, MAC, etc.).</p>
         <div className="space-y-4 max-h-96 overflow-y-auto">
           {request.items.map((item, index) => {
             const received = items[index]?.quantityReceived || 0;
             const returned = items[index]?.quantityReturned || 0;
+            const serial = items[index]?.serial_number || '';
             const itemError = errors[index];
             const isOverStock = received > (item.current_stock || 0);
             return (
@@ -842,7 +840,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
                     {itemError}
                   </div>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-1">
                     <label className="block text-xs font-medium text-gray-700">Quantity Received</label>
                     <Input
@@ -850,9 +848,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
                       value={received}
                       onChange={(e) => handleItemChange(index, 'quantityReceived', parseInt(e.target.value) || 0)}
                       min="0"
-                      className={`w-full border focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-3 py-2 shadow-sm ${
-                        isOverStock ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                      }`}
+                      className={`w-full ${isOverStock ? 'border-red-300 bg-red-50' : 'border-gray-300'}`}
                     />
                   </div>
                   <div className="space-y-1">
@@ -862,7 +858,17 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
                       value={returned}
                       onChange={(e) => handleItemChange(index, 'quantityReturned', parseInt(e.target.value) || 0)}
                       min="0"
-                      className="w-full border border-gray-300 focus:ring-2 focus:ring-gray-500 focus:border-gray-500 rounded-lg px-3 py-2 shadow-sm"
+                      className="w-full border-gray-300"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-gray-700">Serial Number (Optional)</label>
+                    <Input
+                      type="text"
+                      value={serial}
+                      onChange={(e) => handleItemChange(index, 'serial_number', e.target.value)}
+                      placeholder="e.g., ABC123, MAC:XX:XX"
+                      className="w-full border-gray-300"
                     />
                   </div>
                 </div>
@@ -873,11 +879,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
       </div>
 
       <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-        <Button
-          variant="outline"
-          onClick={onCancel}
-          className="border-gray-300 hover:bg-gray-50 rounded-lg shadow-sm px-6"
-        >
+        <Button variant="outline" onClick={onCancel} className="border-gray-300 hover:bg-gray-50 rounded-lg shadow-sm px-6">
           Cancel
         </Button>
         <Button 

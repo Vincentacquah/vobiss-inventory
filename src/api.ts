@@ -99,6 +99,7 @@ interface RequestDetails extends Request {
     quantity_returned: number | null;
     item_name: string;
     current_stock: number;
+    serial_number?: string | null;
   }[];
   approvals: {
     id: number;
@@ -729,7 +730,7 @@ export const approveRequest = async (id: string | number, data: { approverName: 
   }
 };
 
-export const finalizeRequest = async (id: string | number, items: { itemId: number; quantityReceived: number; quantityReturned: number }[], releasedBy: string): Promise<{ message: string }> => {
+export const finalizeRequest = async (id: string | number, items: { itemId: number; quantityReceived: number; quantityReturned: number; serial_number?: string | null }[], releasedBy: string): Promise<{ message: string }> => {
   try {
     const response = await apiFetch(`${API_URL}/requests/${id}/finalize`, {
       method: 'POST',
@@ -789,4 +790,10 @@ export const updateSetting = async (key: string, value: string): Promise<{ key: 
     console.error('Error updating setting:', error);
     throw error;
   }
+};
+
+export const getSerialNumbersForItem = async (itemId: number): Promise<SerialNumber[]> => {
+  const response = await fetch(`/api/items/${itemId}/serials`);
+  if (!response.ok) throw new Error('Failed to fetch serials');
+  return response.json();
 };

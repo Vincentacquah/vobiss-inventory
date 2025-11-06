@@ -1,21 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Package, Image, Edit } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 
+interface Subcategory {
+  id: number;
+  name: string;
+}
+
+interface Category {
+  id: number;
+  name: string;
+  subcategories: Subcategory[];
+}
+
 interface ItemFormProps {
   initialData?: {
     name: string;
     description: string;
-    categoryId: string;
+    categoryId: number;
     quantity: number;
     lowStockThreshold: number;
     vendorName?: string;
     unitPrice?: number;
     updateReason?: string;
   };
-  categories: Array<{ id: number; name: string }>;
+  categories: Category[];
   onSave: (data: {
     name: string;
     description: string;
@@ -44,26 +55,51 @@ const ItemForm: React.FC<ItemFormProps> = ({
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
     description: initialData?.description || '',
-    categoryId: initialData?.categoryId || '',
     quantity: initialData?.quantity?.toString() || '10',
     lowStockThreshold: initialData?.lowStockThreshold?.toString() || '5',
     vendorName: initialData?.vendorName || '',
     unitPrice: initialData?.unitPrice ? initialData.unitPrice.toString() : '',
     updateReason: initialData?.updateReason || '',
   });
+  const [selectedMain, setSelectedMain] = useState('');
+  const [selectedSub, setSelectedSub] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialData?.categoryId) {
+      let foundMain = '';
+      let foundSub = '';
+      for (const main of categories) {
+        if (main.id === initialData.categoryId) {
+          foundMain = main.id.toString();
+          break;
+        }
+        for (const sub of main.subcategories) {
+          if (sub.id === initialData.categoryId) {
+            foundMain = main.id.toString();
+            foundSub = sub.id.toString();
+            break;
+          }
+        }
+        if (foundMain) break;
+      }
+      setSelectedMain(foundMain);
+      setSelectedSub(foundSub);
+    }
+  }, [initialData, categories]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim()) {
-      toast({ title: "Error", description: "Item name is required", variant: "destructive" });
+    const categoryId = selectedSub || selectedMain;
+    if (!categoryId) {
+      toast({ title: "Error", description: "Please select a category", variant: "destructive" });
       return;
     }
 
-    if (!formData.categoryId) {
-      toast({ title: "Error", description: "Please select a category", variant: "destructive" });
+    if (!formData.name.trim()) {
+      toast({ title: "Error", description: "Item name is required", variant: "destructive" });
       return;
     }
 
@@ -96,7 +132,7 @@ const ItemForm: React.FC<ItemFormProps> = ({
         {
           name: formData.name,
           description: formData.description,
-          categoryId: formData.categoryId,
+          categoryId,
           quantity: qty,
           lowStockThreshold: threshold,
           vendorName: formData.vendorName || undefined,
@@ -148,18 +184,38 @@ const ItemForm: React.FC<ItemFormProps> = ({
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="category" className="text-sm font-medium text-gray-700">Category *</Label>
+            <Label htmlFor="mainCategory" className="text-sm font-medium text-gray-700">Main Category *</Label>
             <select
-              id="category"
-              value={formData.categoryId}
-              onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+              id="mainCategory"
+              value={selectedMain}
+              onChange={(e) => {
+                setSelectedMain(e.target.value);
+                setSelectedSub('');
+              }}
               className={inputClass}
               required
             >
-              <option value="">Select Category</option>
-              {categories.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              <option value="">Select Main Category</option>
+              {categories.map(main => (
+                <option key={main.id} value={main.id.toString()}>{main.name}</option>
               ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="subCategory" className="text-sm font-medium text-gray-700">Subcategory</Label>
+            <select
+              id="subCategory"
+              value={selectedSub}
+              onChange={(e) => setSelectedSub(e.target.value)}
+              className={inputClass}
+              disabled={!selectedMain}
+            >
+              <option value="">None</option>
+              {selectedMain && categories
+                .find(main => main.id.toString() === selectedMain)
+                ?.subcategories.map(sub => (
+                  <option key={sub.id} value={sub.id.toString()}>{sub.name}</option>
+                ))}
             </select>
           </div>
           <div className="space-y-1">
