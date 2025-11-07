@@ -32,6 +32,10 @@ const Inventory = () => {
   const [currentReceiptDate, setCurrentReceiptDate] = useState('');
   const { toast } = useToast();
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   // Load initial data
   useEffect(() => {
     loadData();
@@ -176,6 +180,7 @@ const Inventory = () => {
       }
     }
     setFilteredItems(filtered);
+    setCurrentPage(1); // Reset to first page on filter
   };
 
   /**
@@ -284,6 +289,14 @@ const Inventory = () => {
     setShowReceiptModal(true);
   };
 
+  // Pagination logic
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = filteredItems.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
+
+  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+
   /**
    * Item Details Content
    */
@@ -301,10 +314,6 @@ const Inventory = () => {
               <div className="flex justify-between">
                 <dt className="text-gray-500">Name</dt>
                 <dd className="font-medium text-gray-900">{item.name}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt className="text-gray-500">Description</dt>
-                <dd className="text-gray-900">{item.description || 'N/A'}</dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">Category</dt>
@@ -606,7 +615,7 @@ const Inventory = () => {
         </div>
       ) : layout === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredItems.map(item => (
+          {currentItems.map(item => (
             <div key={item.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between mb-4">
                 <Package className="h-8 w-8 text-blue-600" />
@@ -641,7 +650,6 @@ const Inventory = () => {
                 </div>
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">{item.name}</h3>
-              {item.description && <p className="text-sm text-gray-600 mb-3">{item.description}</p>}
               <div className="space-y-2 mb-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-700">Category</span>
@@ -701,110 +709,181 @@ const Inventory = () => {
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredItems.map(item => (
-                  <React.Fragment key={item.id}>
-                    <tr className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <Package className="h-5 w-5 text-blue-600 mr-3 flex-shrink-0" />
-                          <div className="text-sm font-medium text-gray-900">{item.name}</div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4"><div className="text-sm text-gray-900">{item.description || 'No description'}</div></td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">{getCategoryName(item.categoryId)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900">{item.vendorName || 'N/A'}</div></td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {item.unitPrice != null ? `$${Number(item.unitPrice).toFixed(2)}` : 'N/A'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{getTotalCost(item.unitPrice, item.quantity)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        {item.receiptImages?.length > 0 ? (
-                          <span className="text-sm text-gray-500">{item.receiptImages.length} receipts</span>
-                        ) : (
-                          <span className="text-sm text-gray-500">None</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`text-sm font-medium px-2 py-1 rounded-full ${getStockStatusColor(item.quantity, item.lowStockThreshold)}`}>
-                          {item.quantity} units
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => {
-                              setExpandedViewId(expandedViewId === item.id ? null : item.id);
-                              if (expandedViewId !== item.id) setShowUpdateReasons(false);
-                            }}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            <Info className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
-                            className="text-green-600 hover:text-green-900"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => { setItemToDelete(item); setConfirmDelete(true); }}
-                            className="text-red-600 hover:text-red-900"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {expandedViewId === item.id && (
-                      <tr>
-                        <td colSpan={9} className="bg-gray-50 p-0">
-                          <div className="p-6"><ItemDetails item={item} /></div>
+        <>
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {currentItems.map(item => (
+                    <React.Fragment key={item.id}>
+                      <tr className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <Package className="h-5 w-5 text-blue-600 mr-3 flex-shrink-0" />
+                            <div className="text-sm font-medium text-gray-900">{item.name}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded-full">{getCategoryName(item.categoryId)}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900">{item.vendorName || 'N/A'}</div></td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {item.unitPrice != null ? `$${Number(item.unitPrice).toFixed(2)}` : 'N/A'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{getTotalCost(item.unitPrice, item.quantity)}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {item.receiptImages?.length > 0 ? (
+                            <span className="text-sm text-gray-500">{item.receiptImages.length} receipts</span>
+                          ) : (
+                            <span className="text-sm text-gray-500">None</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`text-sm font-medium px-2 py-1 rounded-full ${getStockStatusColor(item.quantity, item.lowStockThreshold)}`}>
+                            {item.quantity} units
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => {
+                                setExpandedViewId(expandedViewId === item.id ? null : item.id);
+                                if (expandedViewId !== item.id) setShowUpdateReasons(false);
+                              }}
+                              className="text-blue-600 hover:text-blue-900"
+                            >
+                              <Info className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setExpandedItemId(expandedItemId === item.id ? null : item.id)}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => { setItemToDelete(item); setConfirmDelete(true); }}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
-                    )}
-                    {expandedItemId === item.id && (
-                      <tr>
-                        <td colSpan={9} className="bg-gray-50 p-0">
-                          <ItemForm
-                            initialData={item}
-                            categories={categories}
-                            onSave={(data, file) => handleSaveItem(data, file, item.id)}
-                            onCancel={() => setExpandedItemId(null)}
-                            mode="edit"
-                            isInline={true}
-                          />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                      {expandedViewId === item.id && (
+                        <tr>
+                          <td colSpan={8} className="bg-gray-50 p-0">
+                            <div className="p-6"><ItemDetails item={item} /></div>
+                          </td>
+                        </tr>
+                      )}
+                      {expandedItemId === item.id && (
+                        <tr>
+                          <td colSpan={8} className="bg-gray-50 p-0">
+                            <ItemForm
+                              initialData={item}
+                              categories={categories}
+                              onSave={(data, file) => handleSaveItem(data, file, item.id)}
+                              onCancel={() => setExpandedItemId(null)}
+                              mode="edit"
+                              isInline={true}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Nice Pagination */}
+          {totalPages > 1 && (
+            <div className="mt-6 flex items-center justify-between bg-white px-6 py-4 rounded-xl border border-gray-200 shadow-sm">
+              <div className="text-sm text-gray-700">
+                Showing <span className="font-medium">{indexOfFirstItem + 1}</span> to <span className="font-medium">{Math.min(indexOfLastItem, filteredItems.length)}</span> of <span className="font-medium">{filteredItems.length}</span> results
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => paginate(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="flex items-center"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Previous
+                </Button>
+
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage > totalPages - 3) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={currentPage === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => paginate(pageNum)}
+                        className="w-10"
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                  {totalPages > 5 && currentPage < totalPages - 2 && (
+                    <>
+                      <span className="text-gray-500">...</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => paginate(totalPages)}
+                        className="w-10"
+                      >
+                        {totalPages}
+                      </Button>
+                    </>
+                  )}
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => paginate(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="flex items-center"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <ReceiptModal />
