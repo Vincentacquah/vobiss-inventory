@@ -8,6 +8,25 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 
+// formatDateTime is now global — accessible to all components
+const formatDateTime = (dateString: string): string => {
+  if (!dateString) return 'N/A';
+  let iso = dateString.trim();
+  if (iso.includes(' ') && !iso.includes('T')) {
+    iso = iso.replace(' ', 'T') + 'Z';
+  }
+  const date = new Date(iso);
+  return isNaN(date.getTime()) 
+    ? 'Invalid Date' 
+    : date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+};
+
 interface RequestItem {
   id: number;
   request_id: number;
@@ -16,7 +35,7 @@ interface RequestItem {
   quantity_received: number | null;
   quantity_returned: number | null;
   item_name: string;
-  serial_number?: string | null; // Added serial_number field
+  serial_number?: string | null;
 }
 
 interface Approval {
@@ -61,6 +80,7 @@ interface EditableItem {
   requested?: number;
   received?: number;
   returned?: number;
+  serial_number?: string;
 }
 
 const RequestDetails: React.FC = () => {
@@ -96,7 +116,8 @@ const RequestDetails: React.FC = () => {
             name: item.item_name,
             requested: item.quantity_requested || 0,
             received: item.quantity_received || 0,
-            returned: item.quantity_returned || 0
+            returned: item.quantity_returned || 0,
+            serial_number: item.serial_number || ''
           };
           if (requestData.type === 'item_return') {
             base.returned = item.quantity_requested || 0;
@@ -128,8 +149,8 @@ const RequestDetails: React.FC = () => {
 
   const addItemRow = () => {
     const newItem: EditableItem = request?.type === 'item_return' 
-      ? { name: '', returned: 0 } 
-      : { name: '', requested: 0, received: 0, returned: 0 };
+      ? { name: '', returned: 0, serial_number: '' } 
+      : { name: '', requested: 0, received: 0, returned: 0, serial_number: '' };
     setSelectedItems([...selectedItems, newItem]);
   };
 
@@ -181,7 +202,8 @@ const RequestDetails: React.FC = () => {
           name: item.item_name,
           requested: item.quantity_requested || 0,
           received: item.quantity_received || 0,
-          returned: item.quantity_returned || 0
+          returned: item.quantity_returned || 0,
+          serial_number: item.serial_number || ''
         };
         if (request!.type === 'item_return') {
           base.returned = item.quantity_requested || 0;
@@ -408,11 +430,11 @@ const RequestDetails: React.FC = () => {
                       </tr>
                       <tr className="bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Created At</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.created_at).toLocaleString()}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDateTime(request.created_at)}</td>
                       </tr>
                       <tr className="bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Updated At</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(request.updated_at).toLocaleString()}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDateTime(request.updated_at)}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -421,7 +443,7 @@ const RequestDetails: React.FC = () => {
             </div>
           </section>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="space-y-8">
             <ItemsTable
               items={editing ? selectedItems : request.items}
               editing={editing}
@@ -509,11 +531,11 @@ const RequestDetails: React.FC = () => {
                   </tr>
                   <tr className="bg-gray-50">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Created At</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.created_at).toLocaleString()}</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{formatDateTime(request.created_at)}</td>
                   </tr>
                   <tr className="bg-gray-50">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Updated At</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{new Date(request.updated_at).toLocaleString()}</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{formatDateTime(request.updated_at)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -536,7 +558,7 @@ const RequestDetails: React.FC = () => {
                       </>
                     ) : null}
                     <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Returned</th>
-                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Serial Number</th> {/* Added serial number column */}
+                    <th className="border border-gray-300 px-3 py-1.5 text-left font-bold text-gray-900 uppercase tracking-wide text-xs">Serial Number</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -550,7 +572,7 @@ const RequestDetails: React.FC = () => {
                         </>
                       ) : null}
                       <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_requested || 0) : (item.quantity_returned || 'N/A')}</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.serial_number || 'N/A'}</td> {/* Display serial number */}
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.serial_number || 'N/A'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -564,7 +586,7 @@ const RequestDetails: React.FC = () => {
               {request.release_by && (
                 <div className="mb-2 pb-1 border-b border-gray-200">
                   <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Issuer:</span><span className="ml-1">{request.release_by}</span></div>
-                  <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(request.updated_at).toLocaleString()}</span></div>
+                  <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(request.updated_at)}</span></div>
                 </div>
               )}
               {request.approvals.length > 0 && (
@@ -574,7 +596,7 @@ const RequestDetails: React.FC = () => {
                     <div key={approval.id} className={`pb-2 ${index < request.approvals.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
                       <div className="flex mb-0.5 font-bold text-gray-900"><span className="w-16">Approver:</span><span className="ml-1">{approval.approver_name}</span></div>
                       <div className="flex mb-0.5 text-gray-700"><span className="w-16 font-medium">Signature:</span><span className="ml-1 italic">{approval.signature}</span></div>
-                      <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(approval.approved_at).toLocaleString()}</span></div>
+                      <div className="flex text-gray-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(approval.approved_at)}</span></div>
                     </div>
                   ))}
                 </div>
@@ -586,7 +608,7 @@ const RequestDetails: React.FC = () => {
                     <div key={rejection.id} className={`pb-2 ${index < request.rejections!.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
                       <div className="flex mb-0.5 font-bold text-red-900"><span className="w-16">Rejector:</span><span className="ml-1">{rejection.rejector_name}</span></div>
                       <div className="flex mb-0.5 text-red-700"><span className="w-16 font-medium">Reason:</span><span className="ml-1 italic">{rejection.reason}</span></div>
-                      <div className="flex text-red-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{new Date(rejection.created_at).toLocaleString()}</span></div>
+                      <div className="flex text-red-700"><span className="w-16">Date:</span><span className="ml-1 font-medium">{formatDateTime(rejection.created_at)}</span></div>
                     </div>
                   ))}
                 </div>
@@ -811,7 +833,7 @@ interface DateFieldProps {
 const DateField: React.FC<DateFieldProps> = ({ label, value }) => (
   <div>
     <label className="block text-sm font-medium text-gray-600">{label}</label>
-    <p className="mt-1 text-sm text-gray-600">{new Date(value).toLocaleString()}</p>
+    <p className="mt-1 text-sm text-gray-600">{formatDateTime(value)}</p>
   </div>
 );
 
@@ -857,7 +879,7 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
               </>
             ) : null}
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Returned</th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Serial Number</th> {/* Added serial number column */}
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Serial Number</th>
             {editing && <th className="px-4 py-3 text-left text-xs font-medium text-gray-600 uppercase">Actions</th>}
           </tr>
         </thead>
@@ -975,7 +997,7 @@ const ItemRow: React.FC<ItemRowProps> = ({
           </>
         ) : null}
         <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_requested || item.requested || 0) : (item.quantity_returned || item.returned || 'N/A')}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.serial_number || 'N/A'}</td> {/* Display serial number */}
+        <td className="px-4 py-3 text-sm text-gray-800">{item.serial_number || 'N/A'}</td>
       </>
     )}
   </tr>
@@ -1003,7 +1025,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, 
             <div key={approval.id} className="border-l-4 border-blue-500 pl-4 py-2 mb-3 bg-blue-50 rounded">
               <p className="text-sm font-medium text-gray-800">{approval.approver_name}</p>
               <p className="text-sm text-gray-600">Signature: {approval.signature}</p>
-              <p className="text-sm text-gray-600">Approved: {new Date(approval.approved_at).toLocaleString()}</p>
+              <p className="text-sm text-gray-600">Approved: {formatDateTime(approval.approved_at)}</p>
             </div>
           ))}
         </div>
@@ -1015,7 +1037,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, 
             <div key={rejection.id} className="border-l-4 border-red-500 pl-4 py-2 mb-3 bg-red-50 rounded">
               <p className="text-sm font-medium text-red-800">Rejected by: {rejection.rejector_name}</p>
               <p className="text-sm text-red-600"><strong>Reason:</strong> {rejection.reason}</p>
-              <p className="text-sm text-red-600">Rejected: {new Date(rejection.created_at).toLocaleString()}</p>
+              <p className="text-sm text-red-600">Rejected: {formatDateTime(rejection.created_at)}</p>
             </div>
           ))}
         </div>
