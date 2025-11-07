@@ -62,7 +62,7 @@ const upload = multer({
 });
 
 // Middleware
-app.use(cors({ origin: '*' }));  // Allow all origins for office network; tighten in prod (e.g., 'http://172.20.1.87:3000')
+app.use(cors({ origin: '*' }));  // Allow all origins for office network; tighten in prod
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('uploads'));
 
@@ -109,7 +109,7 @@ const requireManager = (req, res, next) => {
   next();
 };
 
-// Helper to get IP (add this near the top, after imports)
+// Helper to get IP
 function getClientIp(req) {
   return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.ip || req.connection.remoteAddress || 'unknown';
 }
@@ -152,11 +152,15 @@ app.post('/api/login', async (req, res) => {
     if (!user || !await bcrypt.compare(password, user.password)) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
+
     const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    // Log audit
+    
     const ip = getClientIp(req);
     const details = { userAgent: req.get('User-Agent') };
-    await insertAuditLog(null, user.id, 'login', ip, details);
+
+    // FIXED: Correct order → user.id first
+    await insertAuditLog(user.id, 'login', ip, details);
+
     res.json({ 
       token, 
       user: { 
@@ -177,7 +181,10 @@ app.post('/api/logout', authenticateToken, async (req, res) => {
   try {
     const ip = getClientIp(req);
     const details = { userAgent: req.get('User-Agent') };
-    await insertAuditLog(null, req.user.id, 'logout', ip, details);
+
+    // FIXED: Correct order → req.user.id first
+    await insertAuditLog(req.user.id, 'logout', ip, details);
+
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Error in logout:', error.stack);
@@ -206,7 +213,7 @@ app.get('/api/users/approvers', authenticateToken, async (req, res) => {
   }
 });
 
-// Settings Routes (add auth if needed)
+// Settings Routes
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const settings = await getSettings();
@@ -229,7 +236,7 @@ app.post('/api/settings/:key', authenticateToken, async (req, res) => {
   }
 });
 
-// Backup endpoint (updated to require developer code)
+// Backup endpoint
 app.post('/api/backup', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { developerCode } = req.body;
@@ -244,7 +251,7 @@ app.post('/api/backup', authenticateToken, requireSuperAdmin, async (req, res) =
   }
 });
 
-// Restore endpoint (updated to require developer code)
+// Restore endpoint
 app.post('/api/restore', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const { backup, developerCode } = req.body;
@@ -275,7 +282,7 @@ app.post('/api/wipe', authenticateToken, requireSuperAdmin, async (req, res) => 
   }
 });
 
-// Supervisors Routes (add auth)
+// Supervisors Routes
 app.get('/api/supervisors', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const supervisors = await getSupervisors();
@@ -317,7 +324,7 @@ app.delete('/api/supervisors/:id', authenticateToken, requireSuperAdmin, async (
   }
 });
 
-// New Users Routes (Super Admin only)
+// Users Routes
 app.get('/api/users', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const users = await getUsers();
@@ -371,11 +378,10 @@ app.put('/api/users/:id/role', authenticateToken, requireSuperAdmin, async (req,
   }
 });
 
-// Full user update route
 app.put('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
-    const updates = req.body; // { first_name, last_name, email, role }
+    const updates = req.body;
     const ip = getClientIp(req);
     const user = await updateUser(userId, updates, req.user.id, ip);
     res.json(user);
@@ -385,7 +391,6 @@ app.put('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res)
   }
 });
 
-// Delete user route
 app.delete('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
     const userId = parseInt(req.params.id);
@@ -398,14 +403,13 @@ app.delete('/api/users/:id', authenticateToken, requireSuperAdmin, async (req, r
   }
 });
 
-// Dedicated route for manually triggering low stock alerts (updated to accept lowStockItems and supervisors)
+// Low Stock Alert
 app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
   try {
     const { force, lowStockItems, supervisors } = req.body;
     if (force) {
       console.log('Force-triggered low stock alert');
     }
-    // Pass data to emailService (if not provided, emailService will fetch defaults)
     await sendLowStockAlert(lowStockItems, supervisors);
     res.json({ message: 'Low stock alert sent successfully to supervisors (or no items to alert about)' });
   } catch (error) {
@@ -414,7 +418,7 @@ app.post('/api/send-low-stock-alert', authenticateToken, async (req, res) => {
   }
 });
 
-// Items Routes (add auth where appropriate, e.g., superadmin for delete)
+// Items Routes
 app.get('/api/items', authenticateToken, async (req, res) => {
   try {
     const items = await getItems();
@@ -427,8 +431,8 @@ app.get('/api/items', authenticateToken, async (req, res) => {
 
 app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
-    console.log('Add item request - Body:', req.body);  // Enhanced logging
-    console.log('Add item request - File:', req.file ? req.file.filename : 'No file');  // Log file upload
+    console.log('Add item request - Body:', req.body);
+    console.log('Add item request - File:', req.file ? req.file.filename : 'No file');
 
     const itemData = req.body;
     let receiptImages = [];
@@ -438,21 +442,15 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
     const ip = getClientIp(req);
     const item = await addItem({ ...itemData, receipt_images: JSON.stringify(receiptImages) }, req.user.id, ip);
 
-    console.log('Add item success - Returned item:', item);  // Log successful response
-
     const parsedQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
-    // Only trigger alert if the newly added item is low stock
     if (parsedQuantity <= threshold) {
       console.log('New item added is low stock, triggering alert (non-blocking)');
       sendLowStockAlert([item]).catch(err => console.error('Alert failed after item add:', err));
-    } else {
-      console.log('New item added is not low stock, skipping alert');
     }
     res.status(201).json(item);
   } catch (error) {
-    console.error('Error adding item - Full stack:', error.stack);  // Enhanced error logging
-    console.error('Error adding item - Body was:', req.body);  // Log request data on error
+    console.error('Error adding item - Full stack:', error.stack);
     res.status(500).json({ error: `Failed to add item: ${error.message}` });
   }
 });
@@ -460,14 +458,10 @@ app.post('/api/items', authenticateToken, upload.single('receiptImage'), async (
 app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), async (req, res) => {
   try {
     const itemId = parseInt(req.params.id);
-    console.log(`Update item request for ID ${itemId} - Body:`, req.body);  // Enhanced logging
-    console.log(`Update item request for ID ${itemId} - File:`, req.file ? req.file.filename : 'No file');  // Log file upload
-
     const currentItems = await getItems();
     const currentItem = currentItems.find(item => item.id === itemId);
     
     if (!currentItem) {
-      console.warn(`Update item - Item ${itemId} not found`);
       return res.status(404).json({ error: 'Item not found' });
     }
 
@@ -488,32 +482,21 @@ app.put('/api/items/:id', authenticateToken, upload.single('receiptImage'), asyn
     const ip = getClientIp(req);
     const item = await updateItem(itemId, updatedItemData, req.user.id, ip);
 
-    console.log(`Update item success for ID ${itemId} - Returned item:`, item);  // Log successful response
-
-    // Check if quantity decreased and now <= threshold (newly low or lower)
     const oldQuantity = parseInt(currentItem.quantity, 10);
     const newQuantity = parseInt(itemData.quantity, 10);
     const threshold = item.low_stock_threshold || 5;
     if (newQuantity < oldQuantity && newQuantity <= threshold) {
-      console.log('Item updated to low stock, triggering alert (non-blocking)');
       sendLowStockAlert([item]).catch(err => console.error('Alert failed after item update:', err));
-    } else {
-      console.log('Item updated but not newly low stock, skipping alert');
     }
     res.json(item);
   } catch (error) {
-    console.error(`Error updating item ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error updating item ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
-    console.error(`Error updating item ID ${req.params.id} - File was:`, req.file ? req.file.filename : 'No file');  // Log file on error
+    console.error(`Error updating item ID ${req.params.id} - Full stack:`, error.stack);
     res.status(error.message === 'Item not found' ? 404 : 500).json({ error: `Failed to update item: ${error.message}` });
   }
 });
 
 app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    console.log(`Delete item request for ID ${req.params.id}`);  // Enhanced logging
-
-    // Delete associated receipt images
     const currentItems = await getItems();
     const itemToDelete = currentItems.find(item => item.id === parseInt(req.params.id));
     if (itemToDelete) {
@@ -522,7 +505,6 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
         receiptImages = typeof itemToDelete.receipt_images === 'string' ? JSON.parse(itemToDelete.receipt_images) : itemToDelete.receipt_images || [];
       } catch (e) {
         console.warn('Delete item - Failed to parse receipt_images:', e);
-        receiptImages = [];
       }
       receiptImages.forEach(imgPath => {
         try {
@@ -535,15 +517,14 @@ app.delete('/api/items/:id', authenticateToken, requireSuperAdmin, async (req, r
     
     const ip = getClientIp(req);
     const result = await deleteItem(req.params.id, req.user.id, ip);
-    console.log(`Delete item success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error deleting item ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error deleting item ID ${req.params.id} - Full stack:`, error.stack);
     res.status(error.message === 'Item not found' ? 404 : 500).json({ error: error.message });
   }
 });
 
-// Categories Routes (add auth)
+// Categories Routes
 app.get('/api/categories', authenticateToken, async (req, res) => {
   try {
     const categories = await getCategories();
@@ -556,46 +537,38 @@ app.get('/api/categories', authenticateToken, async (req, res) => {
 
 app.post('/api/categories', authenticateToken, async (req, res) => {
   try {
-    console.log('Add category request - Body:', req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const category = await addCategory(req.body, req.user.id, ip);
-    console.log('Add category success - Returned:', category);  // Log success
     res.status(201).json(category);
   } catch (error) {
-    console.error('Error adding category - Full stack:', error.stack);  // Enhanced error logging
-    console.error('Error adding category - Body was:', req.body);  // Log request data on error
+    console.error('Error adding category - Full stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.put('/api/categories/:id', authenticateToken, async (req, res) => {
   try {
-    console.log(`Update category request for ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const category = await updateCategory(req.params.id, req.body, req.user.id, ip);
-    console.log(`Update category success for ID ${req.params.id} - Returned:`, category);  // Log success
     res.json(category);
   } catch (error) {
-    console.error(`Error updating category ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error updating category ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error updating category ID ${req.params.id} - Full stack:`, error.stack);
     res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
   }
 });
 
 app.delete('/api/categories/:id', authenticateToken, requireSuperAdmin, async (req, res) => {
   try {
-    console.log(`Delete category request for ID ${req.params.id}`);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await deleteCategory(req.params.id, req.user.id, ip);
-    console.log(`Delete category success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error deleting category ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
+    console.error(`Error deleting category ID ${req.params.id} - Full stack:`, error.stack);
     res.status(error.message === 'Category not found' ? 404 : 500).json({ error: error.message });
   }
 });
 
-// Items Out Routes (add auth)
+// Items Out Routes
 app.get('/api/items-out', authenticateToken, async (req, res) => {
   try {
     const itemsOut = await getItemsOut();
@@ -607,12 +580,9 @@ app.get('/api/items-out', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/items-out', authenticateToken, async (req, res) => {
-  console.log('Received issueItem request with data:', req.body);
   try {
     const ip = getClientIp(req);
     const itemOut = await issueItem(req.body, req.user.id, ip);
-    // Always trigger after issuing (decreases stock)
-    console.log('Item issued, triggering low stock alert (non-blocking)');
     sendLowStockAlert().catch(err => console.error('Alert failed after item issue:', err));
     res.status(201).json(itemOut);
   } catch (error) {
@@ -643,21 +613,18 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Updated Requests Routes to handle selectedApproverIds as array
+// Requests Routes
 app.post('/api/requests', authenticateToken, async (req, res) => {
   try {
-    console.log('Create request - Body:', req.body);  // Enhanced logging
     const { selectedApproverIds, type = 'material_request', ...requestData } = req.body;
     if (!selectedApproverIds || !Array.isArray(selectedApproverIds) || selectedApproverIds.length === 0) {
       return res.status(400).json({ error: 'At least one selected approver is required' });
     }
     const ip = getClientIp(req);
     const request = await createRequest(requestData, selectedApproverIds, type, req.user.id, ip);
-    console.log('Create request success:', request.id);  // Log success
     res.status(201).json(request);
   } catch (error) {
-    console.error('Error creating request - Full stack:', error.stack);  // Enhanced error logging
-    console.error('Error creating request - Body was:', req.body);  // Log request data on error
+    console.error('Error creating request - Full stack:', error.stack);
     res.status(500).json({ error: error.message });
   }
 });
@@ -674,58 +641,46 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
 
 app.put('/api/requests/:id', authenticateToken, async (req, res) => {
   try {
-    console.log(`Update request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await updateRequest(req.params.id, req.body, req.user.id, ip);
-    console.log(`Update request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error updating request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error updating request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error updating request ID ${req.params.id} - Full stack:`, error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/reject', authenticateToken, requireManager, async (req, res) => {
   try {
-    console.log(`Reject request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const { reason, rejectorName } = req.body;
     const ip = getClientIp(req);
     const result = await rejectRequest(req.params.id, req.user.id, ip, { reason, rejectorName });
-    console.log(`Reject request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error rejecting request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error rejecting request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error rejecting request ID ${req.params.id} - Full stack:`, error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/approve', authenticateToken, async (req, res) => {
   try {
-    console.log(`Approve request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const ip = getClientIp(req);
     const result = await approveRequest(req.params.id, req.body, req.user.id, ip);
-    console.log(`Approve request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error approving request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error approving request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error approving request ID ${req.params.id} - Full stack:`, error.stack);
     res.status(500).json({ error: error.message });
   }
 });
 
 app.post('/api/requests/:id/finalize', authenticateToken, requireSuperAdminOrIssuer, async (req, res) => {
   try {
-    console.log(`Finalize request ID ${req.params.id} - Body:`, req.body);  // Enhanced logging
     const { items, releasedBy } = req.body;
     const ip = getClientIp(req);
     const result = await finalizeRequest(req.params.id, items, releasedBy, req.user.id, ip);
-    console.log(`Finalize request success for ID ${req.params.id}`);  // Log success
     res.json(result);
   } catch (error) {
-    console.error(`Error finalizing request ID ${req.params.id} - Full stack:`, error.stack);  // Enhanced error logging
-    console.error(`Error finalizing request ID ${req.params.id} - Body was:`, req.body);  // Log request data on error
+    console.error(`Error finalizing request ID ${req.params.id} - Full stack:`, error.stack);
     res.status(500).json({ error: error.message });
   }
 });
@@ -740,24 +695,21 @@ app.get('/api/requests/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// UPDATED: Serve static files from Vite's dist folder (for production/office hosting)
+// Serve static files
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// UPDATED: Catch-all handler for client-side routes (AFTER all API routes)
+// Catch-all handler
 app.use((req, res) => {
-  // Skip API and uploads paths to avoid interference
   if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
     return res.status(404).json({ error: 'Not Found' });
   }
-  // Only handle GET requests for SPA (sendFile); others get 405
   if (req.method !== 'GET') {
     return res.status(405).send('Method Not Allowed');
   }
-  // Serve index.html for SPA routing
   res.sendFile(path.join(__dirname, '../dist', 'index.html'));
 });
 
-// UPDATED: Start the server - Bind to 0.0.0.0 for office IP access (172.20.1.87)
+// Start server
 app.listen(port, '0.0.0.0', () => {
   console.log(`Server running on port ${port}`);
   console.log(`Access via: http://localhost:${port} (local) or http://172.20.1.87:${port} (office network)`);
