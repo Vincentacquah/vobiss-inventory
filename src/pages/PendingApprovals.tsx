@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { Search, Clock, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { getRequests, approveRequest, rejectRequest } from '../api';
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,13 @@ interface Request {
   updated_at: string;
   item_count: number;
   reject_reason?: string | null;
+
+  // APPROVAL DATA FROM DB
+  assigned_approver_name?: string;
+  assigned_at?: string;
+  approved_by_name?: string;
+  approved_at?: string;
+  signature?: string;
 }
 
 const PendingApprovals: React.FC = () => {
@@ -38,6 +45,7 @@ const PendingApprovals: React.FC = () => {
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedRequest, setExpandedRequest] = useState<number | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -89,7 +97,7 @@ const PendingApprovals: React.FC = () => {
         variant: "default"
       });
       loadRequests();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error approving request:', error);
       toast({
         title: "Error",
@@ -109,7 +117,9 @@ const PendingApprovals: React.FC = () => {
       return;
     }
     try {
-      const rejectorName = user?.full_name || user?.username || 'Unknown User';
+      const rejectorName = user?.first_name && user?.last_name 
+        ? `${user.first_name} ${user.last_name}` 
+        : user?.username || 'Unknown User';
       await rejectRequest(selectedRequestId, { reason, rejectorName });
       setIsRejectModalOpen(false);
       toast({
@@ -207,77 +217,141 @@ const PendingApprovals: React.FC = () => {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredRequests.map((request) => (
-                    <tr key={request.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:underline font-medium">
-                          {request.id}
-                        </Link>
-                      </td>
-                      <td className="px-6 py-4 border-r border-gray-200">
-                        <div className="text-sm font-medium text-gray-900">{request.project_name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm font-medium text-gray-900">{request.team_leader_name}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm text-gray-900">{request.team_leader_phone}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm text-gray-900">{request.created_by}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <div className="text-sm text-gray-900">{new Date(request.created_at).toLocaleDateString()}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
-                          {statusIcon(request.status)}
-                          {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
-                          {request.status === 'rejected' && request.reject_reason && (
-                            <div className="ml-2 text-xs bg-red-200 px-2 py-1 rounded-full max-w-32 truncate" title={request.reject_reason}>
-                              {request.reject_reason.length > 20 ? `${request.reject_reason.substring(0, 20)}...` : request.reject_reason}
+                    <React.Fragment key={request.id}>
+                      <tr className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:underline font-medium">
+                            {request.id}
+                          </Link>
+                        </td>
+                        <td className="px-6 py-4 border-r border-gray-200">
+                          <div className="text-sm font-medium text-gray-900">{request.project_name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <div className="text-sm font-medium text-gray-900">{request.team_leader_name}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <div className="text-sm text-gray-900">{request.team_leader_phone}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <div className="text-sm text-gray-900">{request.created_by}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <div className="text-sm text-gray-900">{new Date(request.created_at).toLocaleDateString()}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
+                            {statusIcon(request.status)}
+                            {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                            {request.status === 'rejected' && request.reject_reason && (
+                              <div className="ml-2 text-xs bg-red-200 px-2 py-1 rounded-full max-w-32 truncate" title={request.reject_reason}>
+                                {request.reject_reason.length > 20 ? `${request.reject_reason.substring(0, 20)}...` : request.reject_reason}
+                              </div>
+                            )}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="space-x-2">
+                            <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:text-blue-500 text-sm font-medium">
+                              Edit
+                            </Link>
+                            <button
+                              onClick={() => setExpandedRequest(expandedRequest === request.id ? null : request.id)}
+                              className="text-indigo-600 hover:text-indigo-500 text-sm font-medium flex items-center"
+                            >
+                              {expandedRequest === request.id ? (
+                                <>Hide <ChevronUp className="h-4 w-4 ml-1" /></>
+                              ) : (
+                                <>View <ChevronDown className="h-4 w-4 ml-1" /></>
+                              )}
+                            </button>
+                            {request.status === 'pending' && (
+                              <>
+                                <Button
+                                  onClick={() => {
+                                    setSelectedRequestId(request.id);
+                                    setIsModalOpen(true);
+                                  }}
+                                  size="sm"
+                                  className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
+                                >
+                                  Approve
+                                </Button>
+                                <Button
+                                  onClick={() => {
+                                    setSelectedRequestId(request.id);
+                                    setIsRejectModalOpen(true);
+                                  }}
+                                  variant="destructive"
+                                  size="sm"
+                                  className="rounded-lg"
+                                >
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* APPROVAL HISTORY ROW */}
+                      {expandedRequest === request.id && (
+                        <tr>
+                          <td colSpan={9} className="px-6 py-6 bg-gradient-to-b from-gray-50 to-white border-t-2 border-gray-300">
+                            <div className="space-y-5">
+                              {/* Assignment Info */}
+                              {(request.assigned_approver_name || request.assigned_at) && (
+                                <div className="flex flex-wrap gap-6 text-sm text-gray-700">
+                                  <div>
+                                    <span className="font-semibold">Assigned To:</span>{' '}
+                                    <span className="font-medium text-gray-900">
+                                      {request.assigned_approver_name || '—'}
+                                    </span>
+                                  </div>
+                                  <div>
+                                    <span className="font-semibold">Assigned At:</span>{' '}
+                                    <span className="font-medium text-gray-900">
+                                      {request.assigned_at ? new Date(request.assigned_at).toLocaleString() : '—'}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Approval Card */}
+                              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                <h4 className="font-bold text-lg text-gray-800 mb-4 flex items-center">
+                                  <CheckCircle className="h-5 w-5 text-green-600 mr-2" />
+                                  Approval Details
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-sm">
+                                  <div>
+                                    <span className="font-medium text-gray-600">Approved By:</span>
+                                    <p className="mt-1 font-semibold text-gray-900">
+                                      {request.approved_by_name || 'Pending'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-gray-600">Date:</span>
+                                    <p className="mt-1 font-semibold text-gray-900">
+                                      {request.approved_at ? new Date(request.approved_at).toLocaleString() : 'Pending'}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <span className="font-medium text-gray-600">Signature:</span>
+                                    <p className="mt-1 font-mono text-sm bg-gray-100 text-gray-800 px-3 py-1.5 rounded-lg inline-block">
+                                      {request.signature || '—'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                          )}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="space-x-2">
-                          <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:text-blue-500 text-sm font-medium">
-                            Edit
-                          </Link>
-                          <Link to={`/request-forms/${request.id}`} className="text-indigo-600 hover:text-indigo-500 text-sm font-medium">
-                            View
-                          </Link>
-                          {request.status === 'pending' && (
-                            <>
-                              <Button
-                                onClick={() => {
-                                  setSelectedRequestId(request.id);
-                                  setIsModalOpen(true);
-                                }}
-                                size="sm"
-                                className="bg-green-600 text-white hover:bg-green-700 rounded-lg"
-                              >
-                                Approve
-                              </Button>
-                              <Button
-                                onClick={() => {
-                                  setSelectedRequestId(request.id);
-                                  setIsRejectModalOpen(true);
-                                }}
-                                variant="destructive"
-                                size="sm"
-                                className="rounded-lg"
-                              >
-                                Reject
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -291,6 +365,7 @@ const PendingApprovals: React.FC = () => {
         </TabsContent>
       </Tabs>
 
+      {/* MODALS */}
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Approve Request">
         <ApprovalForm onSave={handleApprove} onCancel={() => setIsModalOpen(false)} />
       </Modal>
@@ -302,58 +377,57 @@ const PendingApprovals: React.FC = () => {
   );
 };
 
+// APPROVAL FORM — AUTO-FILL NAME
 interface ApprovalFormProps {
   onSave: (data: { approverName: string; signature: string }) => void;
   onCancel: () => void;
 }
 
 const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
-  const [approverName, setApproverName] = useState('');
+  const { user } = useAuth();
+  const [approverName, setApproverName] = useState(
+    user?.first_name && user?.last_name 
+      ? `${user.first_name} ${user.last_name}` 
+      : user?.username || ''
+  );
   const [signature, setSignature] = useState('');
 
   const handleSubmit = () => {
-    if (!approverName || !signature) {
-      alert('Please fill all fields');
+    if (!approverName.trim() || !signature.trim()) {
+      toast({ title: "Error", description: "Please fill all fields", variant: "destructive" });
       return;
     }
-    onSave({ approverName, signature });
+    onSave({ approverName: approverName.trim(), signature: signature.trim() });
   };
 
   return (
     <div className="space-y-6 p-4 max-w-md mx-auto">
       <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700 mb-1">Approver Name *</label>
-        <p className="text-xs text-gray-500 mb-2">Enter your full name as the approver.</p>
+        <p className="text-xs text-gray-500 mb-2">Your name is pre-filled. You can edit it.</p>
         <Input
           value={approverName}
           onChange={(e) => setApproverName(e.target.value)}
           placeholder="e.g., John Doe"
-          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          className="w-full border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-sm font-semibold text-gray-700 mb-1">Digital Signature / Approval Notes *</label>
-        <p className="text-xs text-gray-500 mb-2">Provide your digital signature or detailed approval notes. Use multiple lines if needed for clarity.</p>
+        <label className="block text-sm font-semibold text-gray-700 mb-1">Digital Signature / Notes *</label>
+        <p className="text-xs text-gray-500 mb-2">Add approval notes or signature.</p>
         <Textarea
           value={signature}
           onChange={(e) => setSignature(e.target.value)}
-          placeholder="e.g., Approved with no issues. Proceed to deployment. Signed: John Doe"
-          className="w-full h-32 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+          placeholder="e.g., Approved. Proceed to deployment."
+          className="w-full h-32 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
           rows={4}
         />
       </div>
       <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-        <Button 
-          variant="outline" 
-          onClick={onCancel} 
-          className="border-gray-300 rounded-lg px-6 py-2"
-        >
+        <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg px-6 py-2">
           Cancel
         </Button>
-        <Button 
-          onClick={handleSubmit} 
-          className="bg-green-600 text-white hover:bg-green-700 rounded-lg px-6 py-2 font-semibold"
-        >
+        <Button onClick={handleSubmit} className="bg-green-600 text-white hover:bg-green-700 rounded-lg px-6 py-2 font-semibold">
           Approve Request
         </Button>
       </div>
@@ -361,6 +435,7 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
   );
 };
 
+// REJECT FORM
 interface RejectFormProps {
   onSave: (reason: string) => void;
   onCancel: () => void;
@@ -371,38 +446,30 @@ const RejectForm: React.FC<RejectFormProps> = ({ onSave, onCancel }) => {
 
   const handleSubmit = () => {
     if (!reason.trim()) {
-      alert('Please provide a rejection reason');
+      toast({ title: "Error", description: "Rejection reason required", variant: "destructive" });
       return;
     }
-    onSave(reason);
+    onSave(reason.trim());
   };
 
   return (
     <div className="space-y-6 p-4 max-w-md mx-auto">
       <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700 mb-1">Rejection Reason *</label>
-        <p className="text-xs text-gray-500 mb-2">Provide a detailed reason for rejection to help the requester understand and improve.</p>
+        <p className="text-xs text-gray-500 mb-2">Be clear and helpful.</p>
         <Textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g., Missing required documentation for the project. Please resubmit with attachments."
-          className="w-full h-40 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+          placeholder="e.g., Missing project budget approval."
+          className="w-full h-40 resize-none border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500"
           rows={6}
         />
       </div>
       <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
-        <Button 
-          variant="outline" 
-          onClick={onCancel} 
-          className="border-gray-300 rounded-lg px-6 py-2"
-        >
+        <Button variant="outline" onClick={onCancel} className="border-gray-300 rounded-lg px-6 py-2">
           Cancel
         </Button>
-        <Button 
-          onClick={handleSubmit} 
-          variant="destructive" 
-          className="rounded-lg px-6 py-2 font-semibold"
-        >
+        <Button onClick={handleSubmit} variant="destructive" className="rounded-lg px-6 py-2 font-semibold">
           Reject Request
         </Button>
       </div>
