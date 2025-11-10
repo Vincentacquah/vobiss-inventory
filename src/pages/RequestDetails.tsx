@@ -11,20 +11,69 @@ import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 // formatDateTime is now global — accessible to all components
 const formatDateTime = (dateString: string): string => {
   if (!dateString) return 'N/A';
-  let iso = dateString.trim();
-  if (iso.includes(' ') && !iso.includes('T')) {
-    iso = iso.replace(' ', 'T') + 'Z';
+
+  let cleaned = dateString.trim();
+
+  // If has time, replace ' ' with 'T'
+  if (cleaned.includes(' ')) {
+    cleaned = cleaned.replace(' ', 'T');
   }
-  const date = new Date(iso);
-  return isNaN(date.getTime()) 
-    ? 'Invalid Date' 
-    : date.toLocaleString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+
+  // If no T, add time if not
+  if (!cleaned.includes('T')) {
+    cleaned += 'T00:00:00';
+  }
+
+  // Try as is
+  let date = new Date(cleaned);
+  if (!isNaN(date.getTime())) {
+    return date.toLocaleString('en-US', {
+      month: 'numeric',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  }
+
+  // If - separator, assume DD-MM-YYYY or MM-DD-YYYY
+  if (cleaned.includes('-')) {
+    const [datePart, timePart] = cleaned.split('T');
+    const parts = datePart.split('-');
+    if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 4) {
+      // Assume DD-MM-YYYY, convert to YYYY-MM-DD
+      const swapped = `${parts[2]}-${parts[1]}-${parts[0]}` + (timePart ? 'T' + timePart : '');
+      date = new Date(swapped);
+      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } else if (parts[0].length === 4) {
+      // YYYY-MM-DD, already tried
+    }
+  }
+
+  // If / separator, assume MM/DD/YYYY or DD/MM/YYYY
+  if (cleaned.includes('/')) {
+    const [datePart, timePart] = cleaned.split('T');
+    const parts = datePart.split('/');
+    if (parts.length === 3) {
+      // Try MM/DD/YYYY
+      const usFormat = `${parts[0]}-${parts[1]}-${parts[2]}` + (timePart ? 'T' + timePart : '');
+      date = new Date(usFormat);
+      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      // Try DD/MM/YYYY
+      const gbFormat = `${parts[1]}-${parts[0]}-${parts[2]}` + (timePart ? 'T' + timePart : '');
+      date = new Date(gbFormat);
+      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+  }
+
+  // Add Z and try
+  date = new Date(cleaned + 'Z');
+  if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  console.log('Failed to parse date:', dateString);
+  return 'N/A';
 };
 
 interface RequestItem {
