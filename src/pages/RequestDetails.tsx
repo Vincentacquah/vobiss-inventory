@@ -602,7 +602,7 @@ const RequestDetails: React.FC = () => {
                 </div>
               )}
               {request.rejections && request.rejections.length > 0 ? (
-                <div className="mb-2 pb-1 border-b border-gray-200">
+                <div>
                   <h3 className="font-bold text-red-900 mb-1">Rejections</h3>
                   {request.rejections.map((rejection, index) => (
                     <div key={rejection.id} className={`pb-2 ${index < request.rejections!.length - 1 ? 'border-b border-gray-200 mb-2' : ''}`}>
