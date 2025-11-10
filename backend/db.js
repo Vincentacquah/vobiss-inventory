@@ -31,6 +31,11 @@ const pool = new Pool({
   password: String(process.env.PG_PASSWORD || ''),
 });
 
+// Set datestyle to ISO, YMD on every connection to ensure consistent date formatting
+pool.on('connect', (client) => {
+  client.query('SET datestyle = "ISO, YMD"').catch(err => console.error('Failed to set datestyle:', err.message));
+});
+
 // Developer code for wipe, backup, restore
 const DEVELOPER_CODE = process.env.DEVELOPER_CODE || 'DEVELOPER_WIPE_2025';
 
@@ -1378,13 +1383,19 @@ export async function getRequests(userRole, userId) {
                 JOIN users u ON ra.approver_id = u.id
                 WHERE ra.request_id = r.id),
                'Unassigned'
-             ) AS approver_names
+             ) AS assigned_approver_name,
+             (SELECT MIN(ra.assigned_at)
+              FROM request_approvers ra
+              WHERE ra.request_id = r.id) AS assigned_at,
+             (SELECT approver_name FROM approvals WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS approved_by_name,
+             (SELECT created_at FROM approvals WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS approved_at,
+             (SELECT signature FROM approvals WHERE request_id = r.id ORDER BY created_at DESC LIMIT 1) AS signature
       FROM requests r
       LEFT JOIN request_items ri ON r.id = ri.request_id
       WHERE r.deleted_at IS NULL
     `;
     let params = [];
-    let whereClause = ' GROUP BY r.id, r.type, r.reason, reject_reason';
+    let whereClause = ' GROUP BY r.id, r.type, r.reason';
     let orderBy = ' ORDER BY r.created_at DESC';
     if (userRole === 'approver') {
       query += ` AND (r.status != 'pending' OR (r.status = 'pending' AND EXISTS (SELECT 1 FROM request_approvers ra WHERE ra.request_id = r.id AND ra.approver_id = $1)))`;
