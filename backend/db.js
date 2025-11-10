@@ -122,6 +122,7 @@ export async function backupDatabase(developerCode) {
 }
 
 // Database restore function
+// Database restore function - FIXED FOR JSONB SAFETY
 export async function restoreDatabase(backupData, developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
     throw new Error('Invalid developer code');
@@ -129,6 +130,7 @@ export async function restoreDatabase(backupData, developerCode) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+
     const truncateOrder = [
       'audit_logs', 'rejections', 'approvals', 'request_items', 'request_approvers', 'item_serial_numbers',
       'requests', 'items_out', 'items', 'vendors', 'categories', 'settings', 'supervisors', 'users'
@@ -136,33 +138,80 @@ export async function restoreDatabase(backupData, developerCode) {
     for (const table of truncateOrder) {
       await client.query(`TRUNCATE TABLE ${table} CASCADE`);
     }
+
     const insertOrder = [
       'users', 'supervisors', 'settings', 'categories', 'vendors', 'items',
       'item_serial_numbers', 'items_out', 'requests', 'request_approvers',
       'request_items', 'approvals', 'rejections', 'audit_logs'
     ];
+
+    // Define JSONB columns per table
+    const jsonbColumns = {
+      audit_logs: ['details'],
+      items: ['receipt_images'],
+      // add more if needed
+    };
+
     for (const table of insertOrder) {
       if (!backupData[table] || backupData[table].length === 0) {
         await client.query(`SELECT setval('${table}_id_seq', 1, false);`);
         continue;
       }
+
+      const tableJsonbCols = jsonbColumns[table] || [];
+
       for (const row of backupData[table]) {
         const keys = Object.keys(row);
         const columns = keys.join(', ');
         const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-        const values = keys.map(key => row[key]);
-        await client.query(`INSERT INTO ${table} (${columns}) VALUES (${placeholders})`, values);
+
+        // Sanitize values: ensure JSONB fields are valid JSON strings
+        const values = keys.map((key, idx) => {
+          const val = row[key];
+
+          if (tableJsonbCols.includes(key)) {
+            if (val === null || val === undefined) {
+              return null;
+            }
+            try {
+              // If it's already a string, parse + restringify to validate
+              if (typeof val === 'string') {
+                JSON.parse(val); // validate
+                return val;
+              }
+              // Otherwise stringify safely
+              return JSON.stringify(val);
+            } catch (e) {
+              console.warn(`Invalid JSON in ${table}.${key}, replacing with {}:`, val);
+              return '{}';
+            }
+          }
+
+          // Handle other types
+          if (val === undefined) return null;
+          if (typeof val === 'boolean') return val;
+          if (typeof val === 'number') return val;
+          if (val === null) return null;
+          return String(val);
+        });
+
+        await client.query(
+          `INSERT INTO ${table} (${columns}) VALUES (${placeholders})`,
+          values
+        );
       }
-      const maxId = Math.max(...backupData[table].map(r => r.id || 0));
+
+      const maxId = Math.max(...backupData[table].map(r => r.id || 0), 0);
       const isCalled = maxId > 0;
       await client.query(`SELECT setval('${table}_id_seq', ${maxId}, ${isCalled});`);
     }
+
     await client.query('COMMIT');
     console.log('Database restore completed successfully.');
     return { message: 'Database restored successfully' };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error restoring database:', error.stack);
+    console.error('Error restoring database:', error.message);
     throw error;
   } finally {
     client.release();

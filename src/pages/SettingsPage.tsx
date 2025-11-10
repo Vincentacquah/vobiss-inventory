@@ -91,23 +91,51 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleRestore = async () => {
-    if (!restoreFile || !restoreCode.trim()) return setError('Backup file and developer code required');
+ const handleRestore = async () => {
+  if (!restoreFile || !restoreCode.trim()) {
+    return setError('Backup file and developer code required');
+  }
+
+  try {
+    let text = await restoreFile.text();
+
+    // Replace null → proper JSON values
+    text = text
+      .replace(/"receipt_images":\s*null/g, '"receipt_images": []')
+      .replace(/"details":\s*null/g, '"details": {}');
+
+    // Validate JSON
+    let backupData;
     try {
-      const text = await restoreFile.text();
-      const res = await fetch('/api/restore', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ backup: text, developerCode: restoreCode })
-      });
-      if (!res.ok) throw new Error('Failed to restore database');
-      setSuccess('Database restored successfully');
-      setRestoreFile(null);
-      setRestoreCode('');
-    } catch (err: any) {
-      setError(err.message || 'Restore failed');
+      backupData = JSON.parse(text);
+    } catch (e) {
+      throw new Error('Invalid backup file format');
     }
-  };
+
+    const res = await fetch('/api/restore', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ 
+        backup: JSON.stringify(backupData), 
+        developerCode: restoreCode 
+      })
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || 'Restore failed');
+    }
+
+    setSuccess('Database restored successfully!');
+    setRestoreFile(null);
+    setRestoreCode('');
+  } catch (err: any) {
+    setError(err.message || 'Restore failed');
+  }
+};
 
   const handleWipe = async () => {
     if (!wipeCode.trim()) return;
