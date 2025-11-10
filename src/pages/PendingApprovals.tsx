@@ -240,7 +240,7 @@ const PendingApprovals: React.FC = () => {
                           <div className="text-sm font-medium text-gray-900">{request.item_count}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
-                          <div className="text-sm text-gray-900">{new Date(request.created_at).toLocaleDateString()}</div>
+                          <div className="text-sm text-gray-900">{new Date(request.created_at.replace(' ', 'T')).toLocaleDateString()}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${statusColor(request.status)}`}>
@@ -314,7 +314,7 @@ const PendingApprovals: React.FC = () => {
                                   <div>
                                     <span className="font-semibold">Assigned At:</span>{' '}
                                     <span className="font-medium text-gray-900">
-                                      {request.assigned_at ? new Date(request.assigned_at).toLocaleString() : '—'}
+                                      {request.assigned_at ? new Date(request.assigned_at.replace(' ', 'T')).toLocaleString() : '—'}
                                     </span>
                                   </div>
                                 </div>
@@ -336,7 +336,7 @@ const PendingApprovals: React.FC = () => {
                                   <div>
                                     <span className="font-medium text-gray-600">Date:</span>
                                     <p className="mt-1 font-semibold text-gray-900">
-                                      {request.approved_at ? new Date(request.approved_at).toLocaleString() : 'Pending'}
+                                      {request.approved_at ? new Date(request.approved_at.replace(' ', 'T')).toLocaleString() : 'Pending'}
                                     </p>
                                   </div>
                                   <div>
@@ -401,7 +401,7 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
   };
 
   return (
-    <div className="space-y-6 p-4 max-w-md mx-auto">
+    <div className="space-y-6 p-6 max-w-xl mx-auto">
       <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700 mb-1">Approver Name *</label>
         <p className="text-xs text-gray-500 mb-2">Your name is pre-filled. You can edit it.</p>
@@ -453,7 +453,7 @@ const RejectForm: React.FC<RejectFormProps> = ({ onSave, onCancel }) => {
   };
 
   return (
-    <div className="space-y-6 p-4 max-w-md mx-auto">
+    <div className="space-y-6 p-6 max-w-xl mx-auto">
       <div className="space-y-2">
         <label className="block text-sm font-semibold text-gray-700 mb-1">Rejection Reason *</label>
         <p className="text-xs text-gray-500 mb-2">Be clear and helpful.</p>
