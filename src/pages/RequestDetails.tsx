@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getRequestDetails, updateRequest, getItems } from '../api';
@@ -8,72 +10,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
 
-// formatDateTime is now global — accessible to all components
-const formatDateTime = (dateString: string): string => {
-  if (!dateString) return 'N/A';
-
-  let cleaned = dateString.trim();
-
-  // If has time, replace ' ' with 'T'
-  if (cleaned.includes(' ')) {
-    cleaned = cleaned.replace(' ', 'T');
-  }
-
-  // If no T, add time if not
-  if (!cleaned.includes('T')) {
-    cleaned += 'T00:00:00';
-  }
-
-  // Try as is
-  let date = new Date(cleaned);
-  if (!isNaN(date.getTime())) {
-    return date.toLocaleString('en-US', {
-      month: 'numeric',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  }
-
-  // If - separator, assume DD-MM-YYYY or MM-DD-YYYY
-  if (cleaned.includes('-')) {
-    const [datePart, timePart] = cleaned.split('T');
-    const parts = datePart.split('-');
-    if (parts.length === 3 && parts[0].length === 2 && parts[1].length === 2 && parts[2].length === 4) {
-      // Assume DD-MM-YYYY, convert to YYYY-MM-DD
-      const swapped = `${parts[2]}-${parts[1]}-${parts[0]}` + (timePart ? 'T' + timePart : '');
-      date = new Date(swapped);
-      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } else if (parts[0].length === 4) {
-      // YYYY-MM-DD, already tried
-    }
-  }
-
-  // If / separator, assume MM/DD/YYYY or DD/MM/YYYY
-  if (cleaned.includes('/')) {
-    const [datePart, timePart] = cleaned.split('T');
-    const parts = datePart.split('/');
-    if (parts.length === 3) {
-      // Try MM/DD/YYYY
-      const usFormat = `${parts[0]}-${parts[1]}-${parts[2]}` + (timePart ? 'T' + timePart : '');
-      date = new Date(usFormat);
-      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-      // Try DD/MM/YYYY
-      const gbFormat = `${parts[1]}-${parts[0]}-${parts[2]}` + (timePart ? 'T' + timePart : '');
-      date = new Date(gbFormat);
-      if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    }
-  }
-
-  // Add Z and try
-  date = new Date(cleaned + 'Z');
-  if (!isNaN(date.getTime())) return date.toLocaleString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-  console.log('Failed to parse date:', dateString);
-  return 'N/A';
+// GLOBAL DATE FORMAT — EXACTLY LIKE PENDING APPROVALS
+const formatDateTime = (dateString: string | null | undefined): string => {
+  if (!dateString) return '—';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return 'Invalid Date';
+  return date.toLocaleString('en-US', {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
 };
 
 interface RequestItem {
@@ -368,7 +318,7 @@ const RequestDetails: React.FC = () => {
                       </div>
                       <DetailField
                         label="Received By"
-                        value={request.received_by || 'N/A'}
+                        value={request.received_by || '—'}
                         editing={false}
                       />
                       <DateField
@@ -402,7 +352,7 @@ const RequestDetails: React.FC = () => {
                       />
                       <DetailField
                         label="ISP Name"
-                        value={editData.isp_name || 'N/A'}
+                        value={editData.isp_name || '—'}
                         editing={true}
                         onChange={(val) => handleFieldChange('isp_name', val)}
                       />
@@ -419,7 +369,7 @@ const RequestDetails: React.FC = () => {
                       />
                       <DetailField
                         label="Received By"
-                        value={request.received_by || 'N/A'}
+                        value={request.received_by || '—'}
                         editing={false}
                       />
                       <DateField
@@ -439,43 +389,43 @@ const RequestDetails: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                       <tr>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Name</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.project_name || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.project_name || '—'}</td>
                       </tr>
                       {!isReturn && (
                         <>
                           <tr className="bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Team Leader Name</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_name || 'N/A'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_name || '—'}</td>
                           </tr>
                           <tr>
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Team Leader Phone</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_phone || 'N/A'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.team_leader_phone || '—'}</td>
                           </tr>
                           <tr className="bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">ISP Name</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.isp_name || 'N/A'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.isp_name || '—'}</td>
                           </tr>
                         </>
                       )}
                       <tr>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Location</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.location || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.location || '—'}</td>
                       </tr>
                       {isReturn && (
                         <tr className="bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Return Reason</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.reason || 'N/A'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.reason || '—'}</td>
                         </tr>
                       )}
                       {!isReturn && (
                         <tr>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Type</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || 'N/A'}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{editData.deployment_type || '—'}</td>
                         </tr>
                       )}
                       <tr className="bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Received By</td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.received_by || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.received_by || '—'}</td>
                       </tr>
                       <tr className="bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Created At</td>
@@ -512,6 +462,7 @@ const RequestDetails: React.FC = () => {
         </div>
       </div>
 
+      {/* PRINT VIEW */}
       <div id="print-content" className="hidden">
         <div className="p-1 max-w-4xl mx-auto bg-white">
           <header className="mb-2 border-b border-gray-500 pb-1 flex items-start justify-between">
@@ -540,43 +491,43 @@ const RequestDetails: React.FC = () => {
                 <tbody>
                   <tr className="border-b border-gray-300">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Name</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.project_name || 'N/A'}</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.project_name || '—'}</td>
                   </tr>
                   {!isReturn && (
                     <>
                       <tr className="bg-gray-50 border-b border-gray-300">
                         <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Team Leader Name</td>
-                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_name || 'N/A'}</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_name || '—'}</td>
                       </tr>
                       <tr className="border-b border-gray-300">
                         <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Team Leader Phone</td>
-                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_phone || 'N/A'}</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.team_leader_phone || '—'}</td>
                       </tr>
                       <tr className="bg-gray-50 border-b border-gray-300">
                         <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">ISP Name</td>
-                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.isp_name || 'N/A'}</td>
+                        <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.isp_name || '—'}</td>
                       </tr>
                     </>
                   )}
                   <tr className="border-b border-gray-300">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Location</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.location || 'N/A'}</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.location || '—'}</td>
                   </tr>
                   {isReturn && (
                     <tr className="bg-gray-50 border-b border-gray-300">
                       <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Return Reason</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.reason || 'N/A'}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.reason || '—'}</td>
                     </tr>
                   )}
                   {!isReturn && (
                     <tr className="border-b border-gray-300">
                       <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Type</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || 'N/A'}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{editData.deployment_type || '—'}</td>
                     </tr>
                   )}
                   <tr className="bg-gray-50 border-b border-gray-300">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Received By</td>
-                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.received_by || 'N/A'}</td>
+                    <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.received_by || '—'}</td>
                   </tr>
                   <tr className="bg-gray-50">
                     <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Created At</td>
@@ -617,11 +568,11 @@ const RequestDetails: React.FC = () => {
                       {!isReturn ? (
                         <>
                           <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_requested || 0}</td>
-                          <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || 'N/A'}</td>
+                          <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.quantity_received || '—'}</td>
                         </>
                       ) : null}
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_requested || 0) : (item.quantity_returned || 'N/A')}</td>
-                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.serial_number || 'N/A'}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{isReturn ? (item.quantity_requested || 0) : (item.quantity_returned || '—')}</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium text-xs">{item.serial_number || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -822,7 +773,7 @@ const DetailField: React.FC<DetailFieldProps> = ({ label, value, editing, onChan
         className="mt-1 w-full rounded-md border-gray-300 focus:border-blue-500 focus:ring-blue-500"
       />
     ) : (
-      <p className="mt-1 text-base font-medium text-gray-800">{value}</p>
+      <p className="mt-1 text-base font-medium text-gray-800">{value || '—'}</p>
     )}
   </div>
 );
@@ -844,7 +795,7 @@ const ReasonField: React.FC<ReasonFieldProps> = ({ label, value, editing, onChan
         className="mt-1 w-full rounded-md border-gray-300 focus:border-blue-500 focus:ring-blue-500 min-h-[80px]"
       />
     ) : (
-      <p className="mt-1 text-base font-medium text-gray-800">{value}</p>
+      <p className="mt-1 text-base font-medium text-gray-800">{value || '—'}</p>
     )}
   </div>
 );
@@ -869,7 +820,7 @@ const DeploymentTypeField: React.FC<DeploymentTypeFieldProps> = ({ value, editin
         </SelectContent>
       </Select>
     ) : (
-      <p className="mt-1 text-base font-medium text-gray-800">{value}</p>
+      <p className="mt-1 text-base font-medium text-gray-800">{value || '—'}</p>
     )}
   </div>
 );
@@ -1042,11 +993,11 @@ const ItemRow: React.FC<ItemRowProps> = ({
         {!isReturn ? (
           <>
             <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_requested || item.requested || 0}</td>
-            <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || 'N/A'}</td>
+            <td className="px-4 py-3 text-sm text-gray-800">{item.quantity_received || item.received || '—'}</td>
           </>
         ) : null}
-        <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_requested || item.requested || 0) : (item.quantity_returned || item.returned || 'N/A')}</td>
-        <td className="px-4 py-3 text-sm text-gray-800">{item.serial_number || 'N/A'}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{isReturn ? (item.quantity_requested || item.requested || 0) : (item.quantity_returned || item.returned || '—')}</td>
+        <td className="px-4 py-3 text-sm text-gray-800">{item.serial_number || '—'}</td>
       </>
     )}
   </tr>
