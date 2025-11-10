@@ -233,7 +233,7 @@ const PendingApprovals: React.FC = () => {
                         <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
                           <div className="text-sm text-gray-900">{request.team_leader_phone}</div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
+                        <td className="px-6 accompanying py-4 whitespace-nowrap border-r border-gray-200">
                           <div className="text-sm text-gray-900">{request.created_by}</div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap border-r border-gray-200">
@@ -253,21 +253,28 @@ const PendingApprovals: React.FC = () => {
                             )}
                           </span>
                         </td>
+
+                        {/* === ACTIONS CELL === */}
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="space-x-2">
-                            <Link to={`/request-forms/${request.id}`} className="text-blue-600 hover:text-blue-500 text-sm font-medium">
-                              Edit
+                          <div className="flex items-center space-x-3">
+                            {/* 1. View Details (replaces Edit) */}
+                            <Link
+                              to={`/request-forms/${request.id}`}
+                              className="text-blue-600 hover:text-blue-500 text-sm font-medium"
+                            >
+                              View Details
                             </Link>
+
+                            {/* 2. Info Icon – Toggle Approval History */}
                             <button
                               onClick={() => setExpandedRequest(expandedRequest === request.id ? null : request.id)}
-                              className="text-indigo-600 hover:text-indigo-500 text-sm font-medium flex items-center"
+                              className="text-gray-500 hover:text-gray-700 transition-colors"
+                              title="Toggle approval history"
                             >
-                              {expandedRequest === request.id ? (
-                                <>Hide <ChevronUp className="h-4 w-4 ml-1" /></>
-                              ) : (
-                                <>View <ChevronDown className="h-4 w-4 ml-1" /></>
-                              )}
+                              <AlertCircle className="h-5 w-5" />
                             </button>
+
+                            {/* 3. Approve / Reject (only pending) */}
                             {request.status === 'pending' && (
                               <>
                                 <Button
@@ -297,11 +304,26 @@ const PendingApprovals: React.FC = () => {
                         </td>
                       </tr>
 
-                      {/* APPROVAL HISTORY ROW */}
+                      {/* === EXPANDED APPROVAL HISTORY ROW === */}
                       {expandedRequest === request.id && (
                         <tr>
                           <td colSpan={9} className="px-6 py-6 bg-gradient-to-b from-gray-50 to-white border-t-2 border-gray-300">
                             <div className="space-y-5">
+                              {/* Header with close button */}
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="font-bold text-lg text-gray-800 flex items-center">
+                                  <AlertCircle className="h-5 w-5 text-indigo-600 mr-2" />
+                                  Approval History
+                                </h4>
+                                <button
+                                  onClick={() => setExpandedRequest(null)}
+                                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                                  title="Close"
+                                >
+                                  <XCircle className="h-5 w-5" />
+                                </button>
+                              </div>
+
                               {/* Assignment Info */}
                               {(request.assigned_approver_name || request.assigned_at) && (
                                 <div className="flex flex-wrap gap-6 text-sm text-gray-700">
@@ -377,7 +399,7 @@ const PendingApprovals: React.FC = () => {
   );
 };
 
-// APPROVAL FORM — AUTO-FILL NAME
+// ==================== APPROVAL FORM ====================
 interface ApprovalFormProps {
   onSave: (data: { approverName: string; signature: string }) => void;
   onCancel: () => void;
@@ -391,6 +413,7 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
       : user?.username || ''
   );
   const [signature, setSignature] = useState('');
+  const { toast } = useToast();
 
   const handleSubmit = () => {
     if (!approverName.trim() || !signature.trim()) {
@@ -435,7 +458,7 @@ const ApprovalForm: React.FC<ApprovalFormProps> = ({ onSave, onCancel }) => {
   );
 };
 
-// REJECT FORM
+// ==================== REJECT FORM ====================
 interface RejectFormProps {
   onSave: (reason: string) => void;
   onCancel: () => void;
@@ -443,6 +466,7 @@ interface RejectFormProps {
 
 const RejectForm: React.FC<RejectFormProps> = ({ onSave, onCancel }) => {
   const [reason, setReason] = useState('');
+  const { toast } = useToast();
 
   const handleSubmit = () => {
     if (!reason.trim()) {
