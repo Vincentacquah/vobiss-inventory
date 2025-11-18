@@ -121,7 +121,6 @@ export async function backupDatabase(developerCode) {
   }
 }
 
-// Database restore function
 // Database restore function - FIXED FOR JSONB SAFETY
 export async function restoreDatabase(backupData, developerCode) {
   if (developerCode !== DEVELOPER_CODE) {
@@ -392,10 +391,20 @@ export async function initDB() {
         status VARCHAR(50) DEFAULT 'pending',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP,
-        deleted_at TIMESTAMP
+        deleted_at TIMESTAMP,
+        car_number VARCHAR(50),
+        drivers_name VARCHAR(255),
+        drivers_contact VARCHAR(50),
+        address TEXT,
+        project_description TEXT
       );
     `, 'requests');
     await addColumnIfNotExists('requests', 'deleted_at', 'TIMESTAMP');
+    await addColumnIfNotExists('requests', 'car_number', 'VARCHAR(50)');
+    await addColumnIfNotExists('requests', 'drivers_name', 'VARCHAR(255)');
+    await addColumnIfNotExists('requests', 'drivers_contact', 'VARCHAR(50)');
+    await addColumnIfNotExists('requests', 'address', 'TEXT');
+    await addColumnIfNotExists('requests', 'project_description', 'TEXT');
 
     // Request approvers junction table
     await createTableIfNotExists(`
@@ -1000,7 +1009,7 @@ export async function updateCategory(categoryId, categoryData, userId, ip) {
     });
 
     roots.forEach(root => {
-      root.totalItems = root.subcategories.reduce((sum, s) => sum + (s.itemCount || 0), 0);
+      root.totalItems = root.subcategories.reduce((sum, sub) => sum + (sub.itemCount || 0), 0);
     });
 
     const updatedRoot = roots.find(r => r.id === categoryId) || map[categoryId];
@@ -1548,10 +1557,11 @@ export async function approveRequest(requestId, approverData, userId, ip) {
   }
 }
 
-export async function finalizeRequest(requestId, items, releasedBy, userId, ip) {
+export async function finalizeRequest(requestId, finalizeData, userId, ip) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { items, releasedBy, waybill } = finalizeData;
     const request = await client.query(
       'SELECT status, type FROM requests WHERE id = $1 AND deleted_at IS NULL',
       [requestId]
@@ -1597,7 +1607,15 @@ export async function finalizeRequest(requestId, items, releasedBy, userId, ip) 
       ['completed', releasedBy, requestId]
     );
 
-    await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy, type: reqType });
+    if (waybill) {
+      const { carNumber, driversName, driversContact, address, projectDescription } = waybill;
+      await client.query(
+        'UPDATE requests SET car_number = $1, drivers_name = $2, drivers_contact = $3, address = $4, project_description = $5 WHERE id = $6',
+        [carNumber, driversName, driversContact, address, projectDescription, requestId]
+      );
+    }
+
+    await insertAuditLog(client, userId, 'finalize_request', ip, { request_id: requestId, released_by: releasedBy, type: reqType, waybill: !!waybill });
     await client.query('COMMIT');
     return { message: 'Request finalized' };
   } catch (error) {

@@ -1,5 +1,4 @@
 'use client';
-
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getRequestDetails, updateRequest, getItems } from '../api';
@@ -9,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Save, X, Plus, Printer } from 'lucide-react';
-
 // GLOBAL DATE FORMAT — EXACTLY LIKE PENDING APPROVALS
 const formatDateTime = (dateString: string | null | undefined): string => {
   if (!dateString) return '—';
@@ -25,7 +23,6 @@ const formatDateTime = (dateString: string | null | undefined): string => {
     hour12: true,
   });
 };
-
 interface RequestItem {
   id: number;
   request_id: number;
@@ -36,7 +33,6 @@ interface RequestItem {
   item_name: string;
   serial_number?: string | null;
 }
-
 interface Approval {
   id: number;
   request_id: number;
@@ -44,7 +40,6 @@ interface Approval {
   signature: string;
   approved_at: string;
 }
-
 interface Rejection {
   id: number;
   request_id: number;
@@ -52,7 +47,6 @@ interface Rejection {
   reason: string;
   created_at: string;
 }
-
 interface RequestDetails {
   id: number;
   type?: 'material_request' | 'item_return';
@@ -72,8 +66,12 @@ interface RequestDetails {
   items: RequestItem[];
   approvals: Approval[];
   rejections?: Rejection[];
+  car_number?: string | null;
+  drivers_name?: string | null;
+  drivers_contact?: string | null;
+  address?: string | null;
+  project_description?: string | null;
 }
-
 interface EditableItem {
   name: string;
   requested?: number;
@@ -81,23 +79,19 @@ interface EditableItem {
   returned?: number;
   serial_number?: string;
 }
-
 const RequestDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-
   const [request, setRequest] = useState<RequestDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Partial<RequestDetails>>({});
   const [allItems, setAllItems] = useState<any[]>([]);
   const [selectedItems, setSelectedItems] = useState<EditableItem[]>([]);
-
   useEffect(() => {
     loadData();
   }, [id]);
-
   const loadData = async () => {
     try {
       setLoading(true);
@@ -105,7 +99,7 @@ const RequestDetails: React.FC = () => {
         getRequestDetails(id!),
         getItems()
       ]);
-      
+     
       setRequest(requestData);
       setEditData(requestData);
       setAllItems(itemsData);
@@ -135,28 +129,23 @@ const RequestDetails: React.FC = () => {
       setLoading(false);
     }
   };
-
   const handleFieldChange = (field: keyof RequestDetails, value: any) => {
     setEditData({ ...editData, [field]: value });
   };
-
   const handleItemChange = (index: number, field: string, value: any) => {
     const newItems = [...selectedItems];
     newItems[index] = { ...newItems[index], [field]: value };
     setSelectedItems(newItems);
   };
-
   const addItemRow = () => {
-    const newItem: EditableItem = request?.type === 'item_return' 
-      ? { name: '', returned: 0, serial_number: '' } 
+    const newItem: EditableItem = request?.type === 'item_return'
+      ? { name: '', returned: 0, serial_number: '' }
       : { name: '', requested: 0, received: 0, returned: 0, serial_number: '' };
     setSelectedItems([...selectedItems, newItem]);
   };
-
   const removeItemRow = (index: number) => {
     setSelectedItems(selectedItems.filter((_, i) => i !== index));
   };
-
   const handleSaveEdit = async () => {
     try {
       const isReturn = request?.type === 'item_return';
@@ -191,7 +180,6 @@ const RequestDetails: React.FC = () => {
       });
     }
   };
-
   const handleCancelEdit = () => {
     setEditing(false);
     setEditData(request!);
@@ -211,7 +199,6 @@ const RequestDetails: React.FC = () => {
       })
     );
   };
-
   const handlePrint = () => {
     const printContent = document.getElementById('print-content');
     if (printContent) {
@@ -222,22 +209,19 @@ const RequestDetails: React.FC = () => {
       window.location.reload();
     }
   };
-
   if (loading) {
     return <LoadingState />;
   }
-
   if (!request) {
     return <NotFoundState />;
   }
-
   const isReturn = request.type === 'item_return';
   const isEditable = request.status === 'pending';
+  const isWaybill = !!request.car_number || !!request.drivers_name || !!request.drivers_contact || !!request.address || !!request.project_description;
   const statusConfig = getStatusConfig(request.status);
   const statusText = request.status.charAt(0).toUpperCase() + request.status.slice(1);
-  const formTitle = isReturn ? 'ITEM RETURN FORM' : 'REQUEST FORM FOR MATERIALS';
+  const formTitle = isWaybill ? 'WAYBILL' : isReturn ? 'ITEM RETURN FORM' : 'REQUEST FORM FOR MATERIALS';
   const requesterLabel = isReturn ? 'Returned by' : 'Requested by';
-
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
@@ -259,8 +243,8 @@ const RequestDetails: React.FC = () => {
               onSave={handleSaveEdit}
             />
             {request.status === 'completed' && (
-              <Button 
-                onClick={handlePrint} 
+              <Button
+                onClick={handlePrint}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 <Printer className="h-4 w-4 mr-2" />
@@ -269,21 +253,18 @@ const RequestDetails: React.FC = () => {
             )}
           </div>
         </div>
-
         <div className="bg-white rounded-lg shadow-md border border-gray-100 p-8" id="screen-content">
           <div className="text-center mb-8 pb-8 border-b border-gray-200">
-            <img 
-              src="/vobiss-logo.png" 
-              alt="VOBISS Logo" 
+            <img
+              src="/vobiss-logo.png"
+              alt="VOBISS Logo"
               className="h-16 mx-auto mb-4"
             />
             <h1 className="text-3xl font-bold text-gray-900">{formTitle}</h1>
           </div>
-
           <div className="flex justify-end mb-8">
             <StatusBadge status={statusText} config={statusConfig} />
           </div>
-
           <section className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-6 border-b border-gray-200 pb-2">
               {isReturn ? 'Return Information' : 'Project Information'}
@@ -441,7 +422,6 @@ const RequestDetails: React.FC = () => {
               )}
             </div>
           </section>
-
           <div className="space-y-8">
             <ItemsTable
               items={editing ? selectedItems : request.items}
@@ -453,22 +433,24 @@ const RequestDetails: React.FC = () => {
               isEditable={isEditable}
               isReturn={isReturn}
             />
-            <HistorySection 
-              approvals={request.approvals} 
-              rejections={request.rejections} 
-              releaseBy={request.release_by} 
+            <HistorySection
+              approvals={request.approvals}
+              rejections={request.rejections}
+              releaseBy={request.release_by}
             />
+            {isWaybill && (
+              <WaybillSection request={request} />
+            )}
           </div>
         </div>
       </div>
-
       {/* PRINT VIEW */}
       <div id="print-content" className="hidden">
         <div className="p-1 max-w-4xl mx-auto bg-white">
           <header className="mb-2 border-b border-gray-500 pb-1 flex items-start justify-between">
-            <img 
-              src="/vobiss-logo.png" 
-              alt="VOBISS Logo" 
+            <img
+              src="/vobiss-logo.png"
+              alt="VOBISS Logo"
               className="h-14"
             />
             <div className="flex-1 text-center mx-1">
@@ -478,7 +460,6 @@ const RequestDetails: React.FC = () => {
               <StatusBadgePrint status={statusText} config={statusConfig} />
             </div>
           </header>
-
           <section className="mb-2">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">
               {isReturn ? 'Return Information' : 'Project Information'}
@@ -541,9 +522,7 @@ const RequestDetails: React.FC = () => {
               </table>
             </div>
           </section>
-
           <hr className="my-1 border-gray-300" />
-
           <section className="mb-2">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Items</h2>
             <div className="overflow-hidden rounded border border-gray-300">
@@ -579,7 +558,6 @@ const RequestDetails: React.FC = () => {
               </table>
             </div>
           </section>
-
           <section className="mb-4">
             <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">History</h2>
             <div className="border border-gray-300 rounded p-2 bg-gray-50 text-xs">
@@ -618,9 +596,39 @@ const RequestDetails: React.FC = () => {
               )}
             </div>
           </section>
+          {isWaybill && (
+            <section className="mb-4">
+              <h2 className="text-base font-bold mb-1 border-b border-gray-300 pb-0.5 text-gray-800">Waybill Details</h2>
+              <div className="overflow-hidden rounded border border-gray-300">
+                <table className="w-full text-xs bg-white">
+                  <tbody>
+                    <tr className="border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Car Number</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.car_number || '—'}</td>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Driver's Name</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.drivers_name || '—'}</td>
+                    </tr>
+                    <tr className="border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Driver's Contact</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.drivers_contact || '—'}</td>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 text-gray-900">Address</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.address || '—'}</td>
+                    </tr>
+                    <tr className="border-b border-gray-300">
+                      <td className="font-bold border-r border-gray-300 px-3 py-1.5 bg-gray-50 text-gray-900">Project Description</td>
+                      <td className="border border-gray-300 px-3 py-1.5 text-gray-800 font-medium">{request.project_description || '—'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </div>
       </div>
-
       <style jsx global>{`
         @media print {
           body * {
@@ -667,7 +675,6 @@ const RequestDetails: React.FC = () => {
     </div>
   );
 };
-
 const LoadingState: React.FC = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50">
     <div className="text-center">
@@ -676,13 +683,11 @@ const LoadingState: React.FC = () => (
     </div>
   </div>
 );
-
 const NotFoundState: React.FC = () => (
   <div className="flex items-center justify-center min-h-screen bg-gray-50">
     <p className="text-gray-600 font-medium">Request not found</p>
   </div>
 );
-
 interface ActionButtonsProps {
   isEditable: boolean;
   editing: boolean;
@@ -690,7 +695,6 @@ interface ActionButtonsProps {
   onCancel: () => void;
   onSave: () => void;
 }
-
 const ActionButtons: React.FC<ActionButtonsProps> = ({
   isEditable,
   editing,
@@ -699,7 +703,6 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   onSave
 }) => {
   if (!isEditable) return null;
-
   return (
     <div className="flex space-x-3">
       {!editing ? (
@@ -722,13 +725,11 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     </div>
   );
 };
-
 interface StatusConfig {
   bg: string;
   text: string;
   border: string;
 }
-
 function getStatusConfig(status: string): StatusConfig {
   const configs: Record<string, StatusConfig> = {
     pending: { bg: 'bg-yellow-100', text: 'text-yellow-800', border: 'border-yellow-300' },
@@ -738,31 +739,26 @@ function getStatusConfig(status: string): StatusConfig {
   };
   return configs[status] || { bg: 'bg-gray-100', text: 'text-gray-800', border: 'border-gray-300' };
 }
-
 interface StatusBadgeProps {
   status: string;
   config: StatusConfig;
 }
-
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status, config }) => (
   <span className={`inline-flex items-center px-4 py-1.5 rounded-full text-sm font-medium ${config.bg} ${config.text} border ${config.border}`}>
     {status}
   </span>
 );
-
 const StatusBadgePrint: React.FC<StatusBadgeProps> = ({ status, config }) => (
   <div className={`px-1 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text} border ${config.border} inline-block uppercase font-bold`}>
     {status}
   </div>
 );
-
 interface DetailFieldProps {
   label: string;
   value: any;
   editing?: boolean;
   onChange?: (value: any) => void;
 }
-
 const DetailField: React.FC<DetailFieldProps> = ({ label, value, editing, onChange }) => (
   <div>
     <label className="block text-sm font-medium text-gray-600">{label}</label>
@@ -777,14 +773,12 @@ const DetailField: React.FC<DetailFieldProps> = ({ label, value, editing, onChan
     )}
   </div>
 );
-
 interface ReasonFieldProps {
   label: string;
   value: string;
   editing?: boolean;
   onChange?: (value: string) => void;
 }
-
 const ReasonField: React.FC<ReasonFieldProps> = ({ label, value, editing, onChange }) => (
   <div>
     <label className="block text-sm font-medium text-gray-600">{label}</label>
@@ -799,13 +793,11 @@ const ReasonField: React.FC<ReasonFieldProps> = ({ label, value, editing, onChan
     )}
   </div>
 );
-
 interface DeploymentTypeFieldProps {
   value: string | undefined;
   editing: boolean;
   onChange: (value: string) => void;
 }
-
 const DeploymentTypeField: React.FC<DeploymentTypeFieldProps> = ({ value, editing, onChange }) => (
   <div>
     <label className="block text-sm font-medium text-gray-600">Project Type</label>
@@ -824,19 +816,16 @@ const DeploymentTypeField: React.FC<DeploymentTypeFieldProps> = ({ value, editin
     )}
   </div>
 );
-
 interface DateFieldProps {
   label: string;
   value: string;
 }
-
 const DateField: React.FC<DateFieldProps> = ({ label, value }) => (
   <div>
     <label className="block text-sm font-medium text-gray-600">{label}</label>
     <p className="mt-1 text-sm text-gray-600">{formatDateTime(value)}</p>
   </div>
 );
-
 interface ItemsTableProps {
   items: any[];
   editing: boolean;
@@ -847,7 +836,6 @@ interface ItemsTableProps {
   isEditable: boolean;
   isReturn: boolean;
 }
-
 const ItemsTable: React.FC<ItemsTableProps> = ({
   items,
   editing,
@@ -901,7 +889,6 @@ const ItemsTable: React.FC<ItemsTableProps> = ({
     </div>
   </div>
 );
-
 interface ItemRowProps {
   index: number;
   item: any;
@@ -911,7 +898,6 @@ interface ItemRowProps {
   onRemoveRow: (index: number) => void;
   isReturn: boolean;
 }
-
 const ItemRow: React.FC<ItemRowProps> = ({
   index,
   item,
@@ -1002,13 +988,11 @@ const ItemRow: React.FC<ItemRowProps> = ({
     )}
   </tr>
 );
-
 interface HistorySectionProps {
   approvals: any[];
   rejections?: any[];
   releaseBy?: string | null;
 }
-
 const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, releaseBy }) => (
   <div>
     <h2 className="text-lg font-semibold text-gray-800 mb-4">History</h2>
@@ -1048,5 +1032,40 @@ const HistorySection: React.FC<HistorySectionProps> = ({ approvals, rejections, 
     </div>
   </div>
 );
-
+interface WaybillSectionProps {
+  request: RequestDetails;
+}
+const WaybillSection: React.FC<WaybillSectionProps> = ({ request }) => (
+  <div>
+    <h2 className="text-lg font-semibold text-gray-800 mb-4">Waybill Details</h2>
+    <div className="bg-gray-50 rounded-lg shadow-sm border border-gray-100 p-6">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <table className="min-w-full divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-gray-200">
+            <tr>
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Car Number</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.car_number || '—'}</td>
+            </tr>
+            <tr className="bg-gray-50">
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Driver's Name</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.drivers_name || '—'}</td>
+            </tr>
+            <tr>
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Driver's Contact</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.drivers_contact || '—'}</td>
+            </tr>
+            <tr className="bg-gray-50">
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">Address</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.address || '—'}</td>
+            </tr>
+            <tr>
+              <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 bg-gray-50">Project Description</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{request.project_description || '—'}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+);
 export default RequestDetails;

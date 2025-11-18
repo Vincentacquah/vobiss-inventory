@@ -141,7 +141,14 @@ const ApprovedForms: React.FC = () => {
       quantityReturned: number; 
       serial_number?: string | null 
     }[]; 
-    releasedBy: string 
+    releasedBy: string;
+    waybill?: {
+      carNumber: string;
+      driversName: string;
+      driversContact: string;
+      address: string;
+      projectDescription: string;
+    };
   }) => {
     if (!selectedRequest) return;
 
@@ -155,7 +162,7 @@ const ApprovedForms: React.FC = () => {
     }
 
     try {
-      await finalizeRequest(selectedRequest.id, data.items, data.releasedBy);
+      await finalizeRequest(selectedRequest.id, data);
       setIsFormOpen(false);
       setSelectedRequest(null);
       setIsInteracting(false);
@@ -502,10 +509,7 @@ const ApprovedForms: React.FC = () => {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 mb-6">
           <div className="text-center mb-6">
             <img src="/vobiss-logo.png" alt="Vobiss Logo" className="mx-auto h-12 w-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900">FINALIZE REQUEST</h2>
-            <p className="text-gray-600 mt-1">Review and confirm quantities received and returned</p>
-          </div>
-          <FinalizeForm
+            <FinalizeForm
             request={selectedRequest}
             onSave={handleFinalize}
             onCancel={() => {
@@ -514,6 +518,7 @@ const ApprovedForms: React.FC = () => {
               setIsInteracting(false);
             }}
           />
+          </div>
         </div>
       )}
 
@@ -662,7 +667,14 @@ interface FinalizeFormProps {
       quantityReturned: number; 
       serial_number?: string | null 
     }[]; 
-    releasedBy: string 
+    releasedBy: string;
+    waybill?: {
+      carNumber: string;
+      driversName: string;
+      driversContact: string;
+      address: string;
+      projectDescription: string;
+    };
   }) => void;
   onCancel: () => void;
 }
@@ -675,24 +687,56 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
     serial_number: item.serial_number || '',
   })));
   const [releasedBy, setReleasedBy] = useState('');
+  const [formType, setFormType] = useState<'finalize' | 'waybill'>('finalize');
+  const [carNumber, setCarNumber] = useState('');
+  const [driversName, setDriversName] = useState('');
+  const [driversContact, setDriversContact] = useState('');
+  const [address, setAddress] = useState(request.location || '');
+  const [projectDescription, setProjectDescription] = useState(request.project_name || '');
   const [errors, setErrors] = useState<{ [key: number]: string }>({});
   const [submitError, setSubmitError] = useState('');
 
-  const validateItems = () => {
+  const validate = () => {
     const newErrors: { [key: number]: string } = {};
     let hasErrors = false;
 
+    // Validate items
     request.items.forEach((item, index) => {
       const received = items[index]?.quantityReceived || 0;
+      const returned = items[index]?.quantityReturned || 0;
       if (received > (item.current_stock || 0)) {
         newErrors[index] = `Received quantity cannot exceed available stock (${item.current_stock || 0}).`;
         hasErrors = true;
       }
-      if (received < 0 || (items[index]?.quantityReturned || 0) < 0) {
+      if (received < 0 || returned < 0) {
         newErrors[index] = 'Quantities cannot be negative.';
         hasErrors = true;
       }
     });
+
+    // Validate waybill fields if in waybill mode
+    if (formType === 'waybill') {
+      if (!carNumber.trim()) {
+        setSubmitError('Car Number is required for waybill.');
+        hasErrors = true;
+      }
+      if (!driversName.trim()) {
+        setSubmitError('Drivers Name is required for waybill.');
+        hasErrors = true;
+      }
+      if (!driversContact.trim()) {
+        setSubmitError('Drivers Contact is required for waybill.');
+        hasErrors = true;
+      }
+      if (!address.trim()) {
+        setSubmitError('Address is required for waybill.');
+        hasErrors = true;
+      }
+      if (!projectDescription.trim()) {
+        setSubmitError('Project Description is required for waybill.');
+        hasErrors = true;
+      }
+    }
 
     setErrors(newErrors);
     return !hasErrors;
@@ -715,18 +759,21 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
   };
 
   const handleSubmit = () => {
+    setSubmitError('');
     if (!releasedBy.trim()) {
       setSubmitError('Please enter Released By name');
       return;
     }
 
-    const isValid = validateItems();
+    const isValid = validate();
     if (!isValid) {
-      setSubmitError('Please fix the errors in the items section.');
+      if (!submitError) {
+        setSubmitError('Please fix the errors before submitting.');
+      }
       return;
     }
 
-    onSave({ 
+    const data = { 
       items: items.map(item => ({
         itemId: item.itemId,
         quantityReceived: item.quantityReceived,
@@ -734,11 +781,41 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
         serial_number: item.serial_number?.trim() || null
       })), 
       releasedBy 
-    });
+    };
+
+    if (formType === 'waybill') {
+      data.waybill = {
+        carNumber,
+        driversName,
+        driversContact,
+        address,
+        projectDescription
+      };
+    }
+
+    onSave(data);
   };
 
   return (
     <div className="space-y-6 w-full">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-900">{formType === 'waybill' ? 'WAYBILL' : 'FINALIZE REQUEST'}</h2>
+        <p className="text-gray-600 mt-1">Review and confirm quantities received and returned</p>
+      </div>
+
+      <div className="space-y-3">
+        <label className="block text-sm font-semibold text-gray-700">Form Type</label>
+        <Select value={formType} onValueChange={(value: 'finalize' | 'waybill') => setFormType(value)}>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Select form type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="finalize">Finalize Request</SelectItem>
+            <SelectItem value="waybill">Waybill</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
       {submitError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center space-x-2">
           <AlertCircle className="h-4 w-4" />
@@ -784,6 +861,54 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
           />
         </div>
       </div>
+
+      {formType === 'waybill' && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">Waybill Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">Car Number *</label>
+              <Input
+                value={carNumber}
+                onChange={(e) => setCarNumber(e.target.value)}
+                placeholder="Enter car number"
+              />
+            </div>
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">Drivers Name *</label>
+              <Input
+                value={driversName}
+                onChange={(e) => setDriversName(e.target.value)}
+                placeholder="Enter drivers name"
+              />
+            </div>
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">Drivers Contact *</label>
+              <Input
+                value={driversContact}
+                onChange={(e) => setDriversContact(e.target.value)}
+                placeholder="Enter drivers contact"
+              />
+            </div>
+            <div className="md:col-span-2 space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">Address *</label>
+              <Input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Enter address"
+              />
+            </div>
+            <div className="md:col-span-2 space-y-3">
+              <label className="block text-sm font-semibold text-gray-700">Project Description *</label>
+              <Input
+                value={projectDescription}
+                onChange={(e) => setProjectDescription(e.target.value)}
+                placeholder="Enter project description"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2 flex items-center">
@@ -887,7 +1012,7 @@ const FinalizeForm: React.FC<FinalizeFormProps> = ({ request, onSave, onCancel }
           disabled={!releasedBy.trim()}
           className="bg-gray-800 text-white hover:bg-gray-900 rounded-lg shadow-sm px-6 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Finalize Request
+          {formType === 'waybill' ? 'Finalize Waybill' : 'Finalize Request'}
         </Button>
       </div>
     </div>

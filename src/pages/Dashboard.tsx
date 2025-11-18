@@ -69,10 +69,8 @@ interface Request {
 
 /**
  * Dashboard Component
- * Displays an overview of inventory system with key statistics, recent activity, stock overview chart, and quick actions
  */
 const Dashboard = () => {
-  // State management
   const [stats, setStats] = useState<Stats>({
     totalItems: 0,
     totalCategories: 0,
@@ -87,26 +85,18 @@ const Dashboard = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Chart.js registration
   ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
-  // Load dashboard data on component mount and set up periodic refresh
   useEffect(() => {
     loadDashboardData();
-    // Refresh data every 30 seconds (adjust as needed)
     const interval = setInterval(loadDashboardData, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  /**
-   * Loads all dashboard data from API
-   * Includes items, categories, items out, requests, and recent activities
-   */
   const loadDashboardData = async () => {
     try {
       setLoading(true);
 
-      // Fetch data from API
       const [items, categories, itemsOut, requests] = await Promise.all([
         getItems(), 
         getCategories(), 
@@ -115,23 +105,21 @@ const Dashboard = () => {
       ]);
       const statsData = await getDashboardStats();
 
-      // Calculate low stock items
       const lowStock = items.filter((item) => item.quantity <= (item.low_stock_threshold || 0));
-      const totalStocks = items.reduce((sum, item) => sum + item.quantity, 0);
-
+      const totalStockQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
       const completedRequests = requests.filter(r => r.status === 'completed').length;
 
       setStats({
         totalItems: statsData.totalItems || items.length,
         totalCategories: statsData.totalCategories || categories.length,
-        itemsOut: statsData.itemsOut || itemsOut.length + completedRequests, // Combine direct issues and finalized requests
+        itemsOut: statsData.itemsOut || itemsOut.length + completedRequests,
         lowStockItems: statsData.lowStockItems || lowStock.length,
         pendingRequests: statsData.pendingRequests || requests.filter(r => r.status === 'pending').length,
         completedRequests,
       });
       setAllItems(items);
 
-      // Get recent activities from items out (direct issues)
+      // Recent activities logic (unchanged)
       const itemOutActivities: RecentActivity[] = itemsOut
         .slice(0, 2)
         .sort((a, b) => new Date(b.date_time).getTime() - new Date(a.date_time).getTime())
@@ -144,9 +132,8 @@ const Dashboard = () => {
           icon: ArrowUpRight,
         }));
 
-      // Get recent request creations
       const recentRequests = requests
-        .filter(r => new Date(r.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .filter(r => new Date(r.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
         .slice(0, 2)
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .map((req) => ({
@@ -158,9 +145,8 @@ const Dashboard = () => {
           icon: FileText,
         }));
 
-      // Get recent approved requests (using updated_at for approval time)
       const approvedRequests = requests
-        .filter(r => r.status === 'approved' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .filter(r => r.status === 'approved' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
         .slice(0, 2)
         .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
         .map((req) => ({
@@ -172,21 +158,19 @@ const Dashboard = () => {
           icon: CheckCircle,
         }));
 
-      // Get recent completed requests (finalized issuances)
       const completedRequestsActivity = requests
-        .filter(r => r.status === 'completed' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) // Last 7 days
+        .filter(r => r.status === 'completed' && new Date(r.updated_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
         .slice(0, 2)
         .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
         .map((req) => ({
           id: `complete-${req.id}`,
           type: 'request_completed',
           title: `Request finalized`,
-          description: `Project "${req.project_name}" issued by ${req.release_by || 'N/A'}`,
+          description: `Project "${req.project_name}" issued`,
           dateTime: req.updated_at,
           icon: CheckCircle,
         }));
 
-      // Combine and sort all recent activities (limit to 5 most recent)
       const allRecentActivities = [
         ...itemOutActivities,
         ...recentRequests,
@@ -208,21 +192,15 @@ const Dashboard = () => {
     }
   };
 
-  /**
-   * Props interface for StatCard component
-   */
   interface StatCardProps {
     icon: React.ElementType;
     title: string;
-    value: number;
+    value: number | string;
     color: string;
     trend?: string;
     description?: string;
   }
 
-  /**
-   * StatCard component for displaying statistics
-   */
   const StatCard: React.FC<StatCardProps> = ({ icon: Icon, title, value, color, trend, description }) => (
     <div className="group relative bg-gradient-to-br from-white to-gray-50 rounded-2xl p-6 shadow-lg border border-gray-100 hover:shadow-2xl hover:border-gray-200 transition-all duration-300 overflow-hidden">
       <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-blue-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -248,20 +226,21 @@ const Dashboard = () => {
     </div>
   );
 
-  // Prepare chart data for stock overview (with fallback if no data)
+  // Calculate total stock quantity
+  const totalStockQuantity = allItems.reduce((sum, item) => sum + item.quantity, 0);
+  const avgPerItem = allItems.length > 0 ? Math.round(totalStockQuantity / allItems.length) : 0;
+
   const chartData = allItems.length > 0 ? {
     labels: allItems.slice(0, 8).map(item => item.name.substring(0, 15) + (item.name.length > 15 ? '...' : '')),
-    datasets: [
-      {
-        label: 'Stock Quantity',
-        data: allItems.slice(0, 8).map(item => item.quantity),
-        backgroundColor: allItems.slice(0, 8).map((_, i) => `hsl(${i * 45}, 70%, 60%)`),
-        borderColor: allItems.slice(0, 8).map((_, i) => `hsl(${i * 45}, 70%, 40%)`),
-        borderWidth: 2,
-        borderRadius: 4,
-        borderSkipped: false,
-      },
-    ],
+    datasets: [{
+      label: 'Stock Quantity',
+      data: allItems.slice(0, 8).map(item => item.quantity),
+      backgroundColor: allItems.slice(0, 8).map((_, i) => `hsl(${i * 45}, 70%, 60%)`),
+      borderColor: allItems.slice(0, 8).map((_, i) => `hsl(${i * 45}, 70%, 40%)`),
+      borderWidth: 2,
+      borderRadius: 4,
+      borderSkipped: false,
+    }],
   } : {
     labels: [],
     datasets: [{
@@ -277,48 +256,16 @@ const Dashboard = () => {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: {
-        position: 'top' as const,
-        labels: {
-          usePointStyle: true,
-          padding: 20,
-          font: { size: 12 },
-        },
-      },
-      title: {
-        display: true,
-        text: 'Top 8 Items Stock Levels',
-        font: { size: 16, weight: 'bold' },
-        padding: { top: 10, bottom: 20 },
-      },
+      legend: { position: 'top' as const, labels: { usePointStyle: true, padding: 20, font: { size: 12 } } },
+      title: { display: true, text: 'Top 8 Items Stock Levels', font: { size: 16, weight: 'bold' }, padding: { top: 10, bottom: 20 } },
     },
     scales: {
-      y: {
-        beginAtZero: true,
-        grid: {
-          color: 'rgba(0,0,0,0.05)',
-        },
-        ticks: {
-          font: { size: 11 },
-        },
-      },
-      x: {
-        grid: {
-          display: false,
-        },
-        ticks: {
-          maxRotation: 45,
-          font: { size: 11 },
-        },
-      },
+      y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 11 } } },
+      x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 11 } } },
     },
-    animation: {
-      duration: 2000,
-      easing: 'easeOutQuart',
-    },
+    animation: { duration: 2000, easing: 'easeOutQuart' },
   };
 
-  // Show loading state
   if (loading) {
     return (
       <div className="p-6 max-w-7xl mx-auto flex items-center justify-center min-h-screen">
@@ -335,9 +282,7 @@ const Dashboard = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between relative">
         <div className="relative">
-          <h1 className="text-2xl font-black text-gray-900 mb-1">
-            Dashboard
-          </h1>
+          <h1 className="text-2xl font-black text-gray-900 mb-1">Dashboard</h1>
           <div className="absolute -bottom-0.5 left-0 w-full h-0.5 bg-gradient-to-r from-gray-400 to-gray-600 rounded-full opacity-60"></div>
           <p className="text-gray-600 mt-1">Welcome to your inventory management system. Here's what's happening today.</p>
         </div>
@@ -348,8 +293,8 @@ const Dashboard = () => {
         <Sparkles className="absolute top-0 right-0 h-8 w-8 text-purple-400 opacity-30 animate-pulse" />
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Stats Grid - NOW WITH TOTAL STOCK QUANTITY */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
         <StatCard
           icon={Package}
           title="Total Items"
@@ -380,6 +325,17 @@ const Dashboard = () => {
           color="from-red-500 to-red-600 bg-gradient-to-br"
           description="Needs replenishment"
         />
+
+        {/* NEW CARD: TOTAL STOCK QUANTITY */}
+        <StatCard
+          icon={BarChart3}
+          title="Total Stock Qty"
+          value={totalStockQuantity.toLocaleString()}
+          color="from-indigo-500 to-indigo-600 bg-gradient-to-br"
+          description="All items combined"
+          trend={`${avgPerItem} avg per item`}
+        />
+
         <StatCard
           icon={FileText}
           title="Pending Requests"
@@ -398,7 +354,6 @@ const Dashboard = () => {
 
       {/* Chart and Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Stock Overview Chart */}
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-white/20">
           <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
             <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
@@ -416,7 +371,6 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Recent Activity Panel */}
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-white/20">
           <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
             <Users className="h-5 w-5 mr-2 text-blue-600" />
@@ -426,53 +380,23 @@ const Dashboard = () => {
             {recentActivity.length > 0 ? (
               recentActivity.map((activity) => {
                 const Icon = activity.icon;
-                let bgClass = '';
-                let iconBgClass = '';
-                let iconColor = '';
+                let bgClass = '', iconBgClass = '', iconColor = '';
                 switch (activity.type) {
-                  case 'item_out':
-                    bgClass = 'bg-gradient-to-r from-blue-50 to-purple-50';
-                    iconBgClass = 'bg-gradient-to-br from-blue-100 to-purple-100';
-                    iconColor = 'text-blue-600';
-                    break;
-                  case 'request_created':
-                    bgClass = 'bg-gradient-to-r from-green-50 to-emerald-50';
-                    iconBgClass = 'bg-gradient-to-br from-green-100 to-emerald-100';
-                    iconColor = 'text-green-600';
-                    break;
-                  case 'request_approved':
-                    bgClass = 'bg-gradient-to-r from-indigo-50 to-blue-50';
-                    iconBgClass = 'bg-gradient-to-br from-indigo-100 to-blue-100';
-                    iconColor = 'text-indigo-600';
-                    break;
-                  case 'request_completed':
-                    bgClass = 'bg-gradient-to-r from-emerald-50 to-teal-50';
-                    iconBgClass = 'bg-gradient-to-br from-emerald-100 to-teal-100';
-                    iconColor = 'text-emerald-600';
-                    break;
-                  default:
-                    bgClass = 'bg-gradient-to-r from-gray-50 to-gray-100';
-                    iconBgClass = 'bg-gray-100';
-                    iconColor = 'text-gray-600';
+                  case 'item_out': bgClass = 'bg-gradient-to-r from-blue-50 to-purple-50'; iconBgClass = 'bg-gradient-to-br from-blue-100 to-purple-100'; iconColor = 'text-blue-600'; break;
+                  case 'request_created': bgClass = 'bg-gradient-to-r from-green-50 to-emerald-50'; iconBgClass = 'bg-gradient-to-br from-green-100 to-emerald-100'; iconColor = 'text-green-600'; break;
+                  case 'request_approved': bgClass = 'bg-gradient-to-r from-indigo-50 to-blue-50'; iconBgClass = 'bg-gradient-to-br from-indigo-100 to-blue-100'; iconColor = 'text-indigo-600'; break;
+                  case 'request_completed': bgClass = 'bg-gradient-to-r from-emerald-50 to-teal-50'; iconBgClass = 'bg-gradient-to-br from-emerald-100 to-teal-100'; iconColor = 'text-emerald-600'; break;
+                  default: bgClass = 'bg-gradient-to-r from-gray-50 to-gray-100'; iconBgClass = 'bg-gray-100'; iconColor = 'text-gray-600';
                 }
                 return (
-                  <div 
-                    key={activity.id} 
-                    className={`flex items-start p-4 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-300 ${bgClass}`}
-                  >
+                  <div key={activity.id} className={`flex items-start p-4 rounded-xl border border-gray-200 hover:shadow-md transition-all duration-300 ${bgClass}`}>
                     <div className={`${iconBgClass} p-2 rounded-full mr-3 flex-shrink-0`}>
                       <Icon className={`h-4 w-4 ${iconColor}`} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 truncate">
-                        {activity.title}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {activity.description}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {new Date(activity.dateTime).toLocaleString()}
-                      </p>
+                      <p className="text-sm font-medium text-gray-900 truncate">{activity.title}</p>
+                      <p className="text-xs text-gray-500 mt-1">{activity.description}</p>
+                      <p className="text-xs text-gray-400 mt-1">{new Date(activity.dateTime).toLocaleString()}</p>
                     </div>
                   </div>
                 );
@@ -487,33 +411,21 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Quick Actions Panel */}
+      {/* Quick Actions */}
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-xl border border-white/20">
         <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
           <ArrowUpRight className="h-5 w-5 mr-2 text-purple-600" />
           Quick Actions
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Button
-            className="w-full h-20 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
-            onClick={() => navigate('/inventory')}
-          >
-            <Package className="h-6 w-6 mb-1" />
-            Manage Inventory
+          <Button className="w-full h-20 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1" onClick={() => navigate('/inventory')}>
+            <Package className="h-6 w-6 mb-1" /> Manage Inventory
           </Button>
-          <Button
-            className="w-full h-20 rounded-xl bg-gradient-to-br from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
-            onClick={() => navigate('/items-out')}
-          >
-            <ArrowUpRight className="h-6 w-6 mb-1" />
-            Issue Item
+          <Button className="w-full h-20 rounded-xl bg-gradient-to-br from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1" onClick={() => navigate('/items-out')}>
+            <ArrowUpRight className="h-6 w-6 mb-1" /> Issue Item
           </Button>
-          <Button
-            className="w-full h-20 rounded-xl bg-gradient-to-br from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1"
-            onClick={() => navigate('/reports')}
-          >
-            <TrendingUp className="h-6 w-6 mb-1" />
-            View Reports
+          <Button className="w-full h-20 rounded-xl bg-gradient-to-br from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 flex flex-col items-center justify-center text-sm font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1" onClick={() => navigate('/reports')}>
+            <TrendingUp className="h-6 w-6 mb-1" /> View Reports
           </Button>
         </div>
       </div>
