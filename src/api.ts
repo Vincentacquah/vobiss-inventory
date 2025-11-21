@@ -165,6 +165,14 @@ interface Setting {
   updated_at: string;
 }
 
+interface SerialNumber {
+  id: number;
+  item_id: number;
+  serial_number: string;
+  status: string;
+  created_at: string;
+}
+
 interface Approver {
   id: number;
   fullName: string;
@@ -762,7 +770,7 @@ export const getAuditLogs = async (): Promise<AuditLog[]> => {
 };
 
 // Settings
-export const getSettings = async (): Promise<{ [key: string]: string; all: Setting[] }> => {
+export const getSettings = async (): Promise<any> => {
   try {
     const response = await apiFetch(`${API_URL}/settings`, {
       headers: {
@@ -772,7 +780,7 @@ export const getSettings = async (): Promise<{ [key: string]: string; all: Setti
     return await response.json();
   } catch (error) {
     console.error('Error fetching settings:', error);
-    return { from_name: 'Inventory System', from_email: 'noreply@inventory.com', all: [] };
+    return { from_name: 'Inventory System', from_email: 'noreply@inventory.com', all: [] as Setting[] };
   }
 };
 
